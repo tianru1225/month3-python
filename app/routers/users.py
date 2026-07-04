@@ -1,44 +1,34 @@
-from fastapi import APIRouter,Depends,HTTPException,status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from app.deps.db import get_db
-from app.models.user import User
-from app.schemas.user import UserCreate,UserResponse
-router = APIRouter(prefix="/users",tags=["users"])
+from app.schemas.user import UserCreate, UserResponse
+from app.services.user_service import create_user_or_raise, get_user_or_raise
+
+router = APIRouter(prefix="/users", tags=["users"])
+
 @router.post(
     "",
     response_model = UserResponse,
     status_code = status.HTTP_201_CREATED,
-    responses = {400: {"description":"用户名或邮箱已存在"}},
+    summary = "创建用户",
+    description="创建一个新用户。username或email已存在时返回USER_ALREADY_EXISTS",
+    responses={
+        201: {"description": "用户创建成功"},
+        400: {"description": "用户名或邮箱已存在"}
+    }
 )
-def creaete_user(payload: UserCreate,db:Session = Depends(get_db)):
-    existing=(
-        db.query(User)
-        .filter((User.username==payload.username)|(User.email == payload.email))
-        .first()
-    )
-    if existing is not None:
-        raise HTTPException(
-            status_code = 400,
-            detail={"code":"USER_ALREADY_EXISTS","message":"username or email already exists"},
-            )
-    user = User(username=payload.username,email=payload.email)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+def create_user(payload: UserCreate, db: Session = Depends(get_db)):
+    return create_user_or_raise(db,payload)
+
 @router.get(
     "/{user_id}",
-    response_model = UserResponse,
-    responses = {404:{"description":"用户不存在"}},
+    response_model=UserResponse,
+    summary="查询用户",
+    description="根据user_id查询用户。用户不存在时返回USER_NOT_FOUND",
+    responses={
+        200: {"description": "查询成功"},
+        404: {"description": "用户不存在"}
+    }
 )
-def get_user(user_id: int,db:Session = Depends(get_db)):
-    user = db.get(User,user_id)
-    if user is None:
-        raise HTTPException(
-            status_code = status.HTTP_404_NOT_FOUND,
-            detail = {
-            "code":"USER_NOT_FOUND",
-            "message":f"user {user_id} not found",
-            },
-        )
-    return user
+def get_user(user_id: int, db: Session = Depends(get_db)):
+    return get_user_or_raise(db, user_id)

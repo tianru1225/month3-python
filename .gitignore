@@ -16,3 +16,6 @@ htmlcov/
 *.sqlite3
 
 .vscode/
+
+logs/
+artifacts/
