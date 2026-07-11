@@ -2,14 +2,14 @@ from fastapi import APIRouter,Depends,HTTPException,Request,status
 
 from app.core.limiter import limiter
 from app.deps.auth import verify_api_key
-from app.schemas.item import ItemCreate,ItemResponse
+from app.schemas.item import ItemCreate
+from app.utils.response import ok
 
 router = APIRouter(tags=["items"])
 
 @router.post(
     "/items",
     tags=["items"],
-    response_model=ItemResponse,
     summary="创建演示条目",
     description="需要有效 API Key。请求体由 Pydantic 校验，限流命中时返回 429。",
     responses={
@@ -20,11 +20,11 @@ router = APIRouter(tags=["items"])
 )
 @limiter.limit("2/minute")
 def create_item(request: Request,item: ItemCreate,_: str = Depends(verify_api_key)):
-    return {
+    return ok({
         "name": item.name,
         "price": item.price,
         "message": "day70 ok",
-    }
+    })
 @router.get(
     "/items/{item_id}",
     tags=["items"],
@@ -46,4 +46,4 @@ def get_item(request: Request,item_id: int,_: str = Depends(verify_api_key)):
                 "message": f"item {item_id} not found",
             }
         )
-    return {"item_id": item_id, "name": "demo-item"}
+    return ok({"item_id": item_id, "name": "demo-item"})

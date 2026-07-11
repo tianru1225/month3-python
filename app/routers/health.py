@@ -1,5 +1,6 @@
 from fastapi import APIRouter,Request
 from app.core.limiter import limiter
+from app.utils.response import ok
 
 router = APIRouter(tags=["health"])
 
@@ -12,4 +13,4 @@ router = APIRouter(tags=["health"])
     )
 @limiter.limit("3/minute")
 def health_check(request: Request):
-    return {"status":"ok","source":"router"}
+    return ok({"status":"ok","source":"router"})

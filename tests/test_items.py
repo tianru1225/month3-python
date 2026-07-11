@@ -13,7 +13,10 @@ def test_get_item_with_wrong_api_key_returns_401(client):
 def test_get_item_with_valid_api_key_returns_200(client):
     response = client.get("/items/1", headers={"x-api-key": "day69-new-key"})
     assert response.status_code == 200
-    assert response.json() == {"item_id": 1, "name": "demo-item"}
+    body = response.json()
+    assert body["code"] == "OK"
+    assert body["msg"] == "success"
+    assert body["data"] == {"item_id": 1, "name": "demo-item"}
 
 
 def test_create_item_invalid_body_returns_422(client):

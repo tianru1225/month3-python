@@ -1,6 +1,7 @@
 from fastapi import APIRouter,BackgroundTasks,status
 from pydantic import BaseModel
 from app.tasks.audit import write_audit_log
+from app.utils.response import ok
 
 router = APIRouter(prefix="/tasks",tags=["tasks"])
 class AuditEvent(BaseModel):
@@ -16,7 +17,7 @@ class AuditEvent(BaseModel):
 )
 def create_audit_event(payload: AuditEvent,background_tasks: BackgroundTasks):
     background_tasks.add_task(write_audit_log,payload.event)
-    return{
+    return ok({
         "status":"accepted",
         "event": payload.event,
-    }
+    })

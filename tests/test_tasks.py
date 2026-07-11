@@ -6,7 +6,10 @@ def test_create_audit_event_returns_202(client):
         json = {"event":"pytest-background-task"}
     )
     assert response.status_code == 202
-    assert response.json() == {
+    body = response.json()
+    assert body["code"] == "OK"
+    assert body["msg"] == "success"
+    assert body["data"] == {
         "status":"accepted",
         "event" : "pytest-background-task",
     }
