@@ -1,6 +1,6 @@
 import logging
 import time
-import uuid
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from slowapi.errors import RateLimitExceeded
@@ -35,40 +35,23 @@ app.add_middleware(SlowAPIMiddleware)
 
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
-    request_id = str(uuid.uuid4())[:8]
+async def access_log_middleware(request:Request,call_next):
     start = time.perf_counter()
-    client_ip = request.client.host if request.client else "-"
-
-    try:
-        response = await call_next(request)
-        status_code = response.status_code
-    except Exception:
-        duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.exception(
-            "[%s] %s %s -> 500 (%.2f ms) client=%s",
-            request_id,
-            request.method,
-            request.url.path,
-            duration_ms,
-            client_ip,
-        )
-        raise
-
-    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    request_id = request.headers.get("X-Request-ID") or uuid4().hex[:8]
+    request.state.request_id = request_id
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter()-start)*1000
     response.headers["X-Request-ID"] = request_id
-
     logger.info(
-        "[DAY068][%s] %s %s -> %d (%.2f ms) client=%s",
+        "[Day084][%s] %s %s -> %s (%.2f ms) client=%s",
         request_id,
         request.method,
         request.url.path,
-        status_code,
-        duration_ms,
-        client_ip,
+        response.status_code,
+        elapsed_ms,
+        request.client.host if request.client else "-",
     )
     return response
-
 
 @app.get("/")
 def read_root():

@@ -1,4 +1,5 @@
-from fastapi import APIRouter,HTTPException,status
+from fastapi import APIRouter,HTTPException,status,Request
+from app.utils.response import ok
 
 router = APIRouter(tags=["debug"])
 
@@ -19,3 +20,11 @@ def boom():
             "message": "day66 teapot",
         },
     )
+
+@router.get(
+    "/debug/request-id",
+    summary="查看当前请求ID",
+    description="返回当前请求在中间件中生成或接收的X-Request-ID",
+)
+def get_request_id(request: Request):
+    return ok({"request_id":request.state.request_id})
