@@ -9,7 +9,6 @@ router = APIRouter(tags=["items"])
 
 @router.post(
     "/items",
-    tags=["items"],
     summary="创建演示条目",
     description="需要有效 API Key。请求体由 Pydantic 校验，限流命中时返回 429。",
     responses={
@@ -27,7 +26,6 @@ def create_item(request: Request,item: ItemCreate,_: str = Depends(verify_api_ke
     })
 @router.get(
     "/items/{item_id}",
-    tags=["items"],
     summary="查询演示条目",
     description="需要有效 API Key。目前只有 item_id=1 返回演示数据，其他 ID 返回 ITEM_NOT_FOUND。",
     responses={
