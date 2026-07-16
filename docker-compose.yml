@@ -19,8 +19,6 @@ services:
   redis:
     image: redis:7
     container_name: month3-redis
-    ports:
-      - "6379:6379"
     restart: unless-stopped
   worker:
       image: month3-api:day086
@@ -37,3 +35,13 @@ services:
       depends_on:
         - redis
       restart: unless-stopped
+  nginx:
+    image: nginx:1.28-alpine
+    container_name: month3-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - api
+    restart: unless-stopped
