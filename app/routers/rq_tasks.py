@@ -6,9 +6,10 @@ from rq.job import Job
 
 from app.tasks.rq_jobs import write_rq_log,fail_rq_job
 from app.schemas.rq_task import RQTaskRequest,RQTaskResponse,RQJobStatusResponse
+from app.config import settings
 
 router = APIRouter(prefix = "/rq",tags= ["rq"])
-redis_conn = Redis(host = "127.0.0.1",port = 6379,db=0)
+redis_conn = Redis(host=settings.redis_host,port=settings.redis_port,db=settings.redis_db)
 queue = Queue("default",connection = redis_conn)
 
 def job_status_text(job: Job) -> str:

@@ -1,0 +1,5 @@
+from app.core.redis_client import redis_client
+print(redis_client.ping())
+redis_client.set("day086-compose", "ok")
+print(redis_client.get("day086-compose"))
+redis_client.delete("day086-compose")

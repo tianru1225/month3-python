@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: month3-api:day086
+    container_name: month3-api
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+    depends_on:
+      - redis
+    restart: unless-stopped
+  redis:
+    image: redis:7
+    container_name: month3-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+  worker:
+      image: month3-api:day086
+      container_name: month3-worker
+      command: python -m app.worker
+      volumes:
+        - ./logs:/app/logs
+      env_file:
+        - .env
+      environment:
+        REDIS_HOST: redis
+        REDIS_PORT: "6379"
+        REDIS_DB: "0"
+      depends_on:
+        - redis
+      restart: unless-stopped
