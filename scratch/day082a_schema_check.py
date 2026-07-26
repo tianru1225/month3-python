@@ -3,7 +3,6 @@ import sqlite3
 from sqlalchemy import create_engine
 
 from app.db.base import Base
-import app.models
 
 engine = create_engine("sqlite:///scratch/day082a_check.db")
 Base.metadata.drop_all(bind = engine)
