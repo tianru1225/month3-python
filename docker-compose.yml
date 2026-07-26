@@ -16,6 +16,9 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+    dns:
+      - 100.100.100.100
+      - 223.5.5.5
   redis:
     image: redis:7
     container_name: month3-redis
