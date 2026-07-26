@@ -23,7 +23,15 @@ def test_chat_requires_api_Key(client):
 
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "API_KEY_MISSING"
+def test_chat_rejects_invalid_api_key(client):
+    response = client.post(
+        "/v1/chat",
+        headers={"x-api-key": "wrong-key"},
+        json=valid_payload(),
+    )
 
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "API_KEY_INVALID"
 def test_chat_returns_unified_response(client,monkeypatch):
     captured: dict[str,Any] = {}
     def fake_post(url:str,*,json:dict[str,Any],timeout: httpx.Timeout) -> httpx.Response:
@@ -59,6 +67,7 @@ def test_chat_returns_unified_response(client,monkeypatch):
     assert captured["json"]["model"] == settings.ollama_model
     assert captured["json"]["stream"] is False
     assert captured["json"]["options"]["num_predict"] == 300
+    assert captured["json"]["options"]["num_ctx"] == 4096
     
     timeout = captured["timeout"]
     assert isinstance(timeout,httpx.Timeout)

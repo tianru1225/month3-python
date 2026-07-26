@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     ollama_connect_timeout_seconds: float = 10.0
     ollama_read_timeout_seconds: float = 240.0
     ollama_num_predict: int = 300
+    ollama_num_ctx: int = 4096
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -21,6 +21,7 @@ def chat_with_llm(messages: list[ChatMessage]) -> ChatResult:
         "messages": [message.model_dump() for message in messages],
         "stream": False,
         "options": {
+            "num_ctx": settings.ollama_num_ctx,
             "num_predict": settings.ollama_num_predict,
         },
     }
