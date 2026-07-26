@@ -15,6 +15,7 @@ from app.routers.tasks import router as tasks_router
 from app.routers.rq_tasks import router as rq_tasks_router
 from app.routers.debug import router as debug_router
 from app.routers.items import router as items_router
+from app.routers.chat import router as chat_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,3 +70,4 @@ app.include_router(tasks_router)
 app.include_router(rq_tasks_router)
 app.include_router(items_router)
 app.include_router(debug_router)
+app.include_router(chat_router)
