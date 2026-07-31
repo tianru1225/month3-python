@@ -16,9 +16,9 @@ router = APIRouter(prefix = "/v1",tags=["chat"])
     dependencies=[Depends(verify_api_key)],
 )
 
-def create_chat(payload: ChatRequest) -> ApiResponse[ChatResult]:
+async def create_chat(payload: ChatRequest) -> ApiResponse[ChatResult]:
     try:
-        result = chat_with_llm(payload.messages)
+        result =await chat_with_llm(payload.messages)
     except LLMUpstreamError as exc:
         raise HTTPException(
             status_code = 502,
