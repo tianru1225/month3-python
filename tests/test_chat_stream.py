@@ -120,16 +120,11 @@ def test_stream_endpoint_returns_ndjson(
     )
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith(
-        "application/x-ndjson"
-    )
+    assert response.headers["content-type"].startswith("application/x-ndjson")
     assert response.headers["cache-control"] == "no-cache"
     assert response.headers["x-accel-buffering"] == "no"
 
-    body = [
-        json.loads(line)
-        for line in response.text.splitlines()
-    ]
+    body = [json.loads(line) for line in response.text.splitlines()]
 
     assert body == [
         {
@@ -190,6 +185,4 @@ def test_stream_endpoint_requires_api_key(client) -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"]["code"] == (
-        "API_KEY_MISSING"
-    )
+    assert response.json()["detail"]["code"] == ("API_KEY_MISSING")
