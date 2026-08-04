@@ -1,5 +1,7 @@
+import asyncio
 import json
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncGenerator
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -9,6 +11,8 @@ from app.schemas.llm_stream import DoneEvent, ErrorEvent, StreamEvent
 from app.schemas.chat import ChatMessage, ChatResult
 from app.services.errors import LLMUpstreamError
 from app.services.ollama_stream import parse_ollama_stream_line
+
+logger = logging.getLogger("app.llm_stream")
 
 
 class _OllamaChatResponse(BaseModel):
@@ -78,7 +82,7 @@ async def chat_with_llm(
 
 async def _stream_chat_with_client(
     messages: list[ChatMessage], *, client: httpx.AsyncClient
-) -> AsyncIterator[StreamEvent]:
+) -> AsyncGenerator[StreamEvent,None]:
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
 
     try:
@@ -98,13 +102,16 @@ async def _stream_chat_with_client(
 
                 if any(isinstance(event, (DoneEvent, ErrorEvent)) for event in events):
                     return
+    except asyncio.CancelledError:
+        logger.info("LLM upstream stream cancelled")
+        raise
     except httpx.HTTPError as exc:
         raise LLMUpstreamError("LLM 上游流式请求失败。") from exc
 
 
 async def stream_chat_with_llm(
     messages: list[ChatMessage], *, client: httpx.AsyncClient | None = None
-) -> AsyncIterator[StreamEvent]:
+) -> AsyncGenerator[StreamEvent,None]:
     if client is not None:
         async for event in _stream_chat_with_client(messages, client=client):
             yield event
