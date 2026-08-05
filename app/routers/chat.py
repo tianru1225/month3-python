@@ -29,10 +29,10 @@ async def create_chat(payload: ChatRequest) -> ApiResponse[ChatResult]:
         result = await chat_with_llm(payload.messages)
     except LLMUpstreamError as exc:
         raise HTTPException(
-            status_code=502,
+            status_code=exc.http_status,
             detail={
-                "code": "LLM_UPSTREAM_ERROR",
-                "message": "LLM upstream request failed",
+                "code": exc.code,
+                "message": exc.public_message,
             },
         ) from exc
     return ok(result)
@@ -53,12 +53,12 @@ async def _stream_as_ndjson(
     except (asyncio.CancelledError, GeneratorExit):
         outcome = "cancelled"
         raise
-    except LLMUpstreamError:
+    except LLMUpstreamError as exc:
         outcome = "upstream_error"
         error = ErrorEvent(
-            code="LLM_UPSTREAM_ERROR",
-            message="LLM 上游流式请求失败",
-            retryable=False,
+            code=exc.code,
+            message=exc.public_message,
+            retryable=exc.retryable,
         )
         yield error.model_dump_json() + "\n"
     finally:
