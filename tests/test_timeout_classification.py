@@ -71,6 +71,20 @@ def test_connect_timeout_is_classified_and_uses_full_budget() -> None:
         exc_info.value.__cause__,
         httpx.ConnectTimeout,
     )
+
+    error = exc_info.value
+    assert (
+        error.code,
+        error.public_message,
+        error.http_status,
+        error.retryable,
+    ) == (
+        "LLM_UPSTREAM_CONNECTION_ERROR",
+        "LLM upstream is unavailable",
+        503,
+        True,
+    )
+
     assert captured_timeout == {
         "connect": (settings.ollama_connect_timeout_seconds),
         "read": (settings.ollama_read_timeout_seconds),

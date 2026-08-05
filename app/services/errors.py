@@ -6,8 +6,8 @@ class LLMUpstreamError(RuntimeError):
 
 
 class LLMUpstreamConnectionError(LLMUpstreamError):
-    code = "LLM_UPSTREAM_ERROR"
-    public_message = "LLM upstream is unavilable"
+    code = "LLM_UPSTREAM_CONNECTION_ERROR"
+    public_message = "LLM upstream is unavailable"
     http_status = 503
     retryable = True
 
