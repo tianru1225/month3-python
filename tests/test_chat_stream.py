@@ -172,11 +172,10 @@ def test_stream_endpoint_returns_terminal_error_event(
 
     assert json.loads(response.text) == {
         "type": "error",
-        "code": "LLM_UPSTREAM_ERROR",
-        "message": "LLM 上游流式请求失败",
-        "retryable": False,
+        "code": LLMUpstreamError.code,
+        "message": LLMUpstreamError.public_message,
+        "retryable": LLMUpstreamError.retryable,
     }
-
 
 def test_stream_endpoint_requires_api_key(client) -> None:
     response = client.post(
