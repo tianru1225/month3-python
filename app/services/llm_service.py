@@ -9,7 +9,12 @@ from pydantic import BaseModel, ValidationError
 from app.config import settings
 from app.schemas.llm_stream import DoneEvent, ErrorEvent, StreamEvent
 from app.schemas.chat import ChatMessage, ChatResult
-from app.services.errors import LLMUpstreamError
+from app.services.errors import (
+    LLMGenerationTimeoutError,
+    LLMRequestTimeoutError,
+    LLMUpstreamConnectionError,
+    LLMUpstreamError,
+)
 from app.services.ollama_stream import parse_ollama_stream_line
 
 logger = logging.getLogger("app.llm_stream")
@@ -39,9 +44,21 @@ def _build_ollama_timeout() -> httpx.Timeout:
     return httpx.Timeout(
         connect=settings.ollama_connect_timeout_seconds,
         read=settings.ollama_read_timeout_seconds,
-        write=30.0,
-        pool=10.0,
+        write=settings.ollama_write_timeout_seconds,
+        pool=settings.ollama_pool_timeout_seconds,
     )
+
+
+def _translate_httpx_error(exc: httpx.HTTPError) -> LLMUpstreamError:
+    if isinstance(exc, (httpx.ConnectTimeout, httpx.ConnectError)):
+        return LLMUpstreamConnectionError("LLM upstream connection failed")
+    if isinstance(exc, httpx.ReadTimeout):
+        return LLMGenerationTimeoutError("LLM upstream read timed out")
+    if isinstance(exc, (httpx.WriteTimeout, httpx.PoolTimeout)):
+        return LLMRequestTimeoutError("LLM upstream request timed out")
+    if isinstance(exc, httpx.TimeoutException):
+        return LLMRequestTimeoutError("LLM upstream request timed out")
+    return LLMUpstreamError("LLM upstream request failed")
 
 
 async def _chat_with_client(
@@ -57,12 +74,13 @@ async def _chat_with_client(
         )
         response.raise_for_status()
         upstream = _OllamaChatResponse.model_validate(response.json())
+    except httpx.HTTPError as exc:
+        raise _translate_httpx_error(exc) from exc
     except (
-        httpx.HTTPError,
         json.JSONDecodeError,
         ValidationError,
     ) as exc:
-        raise LLMUpstreamError("LLM upstream request failed") from exc
+        raise LLMUpstreamError("LLM upstream response is invalid") from exc
 
     return ChatResult(
         model=upstream.model,
@@ -82,7 +100,7 @@ async def chat_with_llm(
 
 async def _stream_chat_with_client(
     messages: list[ChatMessage], *, client: httpx.AsyncClient
-) -> AsyncGenerator[StreamEvent,None]:
+) -> AsyncGenerator[StreamEvent, None]:
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
 
     try:
@@ -106,12 +124,12 @@ async def _stream_chat_with_client(
         logger.info("LLM upstream stream cancelled")
         raise
     except httpx.HTTPError as exc:
-        raise LLMUpstreamError("LLM 上游流式请求失败。") from exc
+        raise _translate_httpx_error(exc) from exc
 
 
 async def stream_chat_with_llm(
     messages: list[ChatMessage], *, client: httpx.AsyncClient | None = None
-) -> AsyncGenerator[StreamEvent,None]:
+) -> AsyncGenerator[StreamEvent, None]:
     if client is not None:
         async for event in _stream_chat_with_client(messages, client=client):
             yield event
