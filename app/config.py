@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,9 @@ class Settings(BaseSettings):
     ollama_pool_timeout_seconds: float = 10.0
     ollama_num_predict: int = 300
     ollama_num_ctx: int = 4096
+    llm_retry_max_attempts: int = Field(default=3, ge=1, le=5)
+    llm_retry_base_delay_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
+    llm_retry_max_delay_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

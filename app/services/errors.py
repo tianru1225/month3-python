@@ -5,6 +5,13 @@ class LLMUpstreamError(RuntimeError):
     retryable: bool = False
 
 
+class LLMRateLimitError(LLMUpstreamError):
+    code = "LLM_RATE_LIMITED"
+    public_message = "LLM upstream rate limit exceeded"
+    http_status = 429
+    retryable = True
+
+
 class LLMUpstreamConnectionError(LLMUpstreamError):
     code = "LLM_UPSTREAM_CONNECTION_ERROR"
     public_message = "LLM upstream is unavailable"
