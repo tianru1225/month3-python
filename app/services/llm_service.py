@@ -1,7 +1,11 @@
 import asyncio
 import json
 import logging
+import math
+import random
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -14,10 +18,20 @@ from app.services.errors import (
     LLMRequestTimeoutError,
     LLMUpstreamConnectionError,
     LLMUpstreamError,
+    LLMRateLimitError,
 )
 from app.services.ollama_stream import parse_ollama_stream_line
 
 logger = logging.getLogger("app.llm_stream")
+
+_RETRYABLE_STATUS_CODES = frozenset(
+    {
+        429,
+        502,
+        503,
+        504,
+    }
+)
 
 
 class _OllamaChatResponse(BaseModel):
@@ -49,7 +63,94 @@ def _build_ollama_timeout() -> httpx.Timeout:
     )
 
 
+def _parse_retry_after(value: str | None) -> float | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        seconds = float(normalized)
+    except ValueError:
+        seconds = -1.0
+    if math.isfinite(seconds) and seconds >= 0:
+        return seconds
+    try:
+        retry_at = parsedate_to_datetime(normalized)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    return max(
+        0.0,
+        (retry_at - now).total_seconds(),
+    )
+
+
+def _calculate_retry_delay(
+    attempt_index: int, *, response: httpx.Response | None = None
+) -> float | None:
+    max_delay = settings.llm_retry_max_delay_seconds
+    if response is not None:
+        header = response.headers.get("Retry-After")
+        retry_after = _parse_retry_after(header)
+
+        if retry_after is not None:
+            if retry_after > max_delay:
+                return None
+            return retry_after
+    exponential_cap = min(
+        max_delay,
+        settings.llm_retry_base_delay_seconds * (2**attempt_index),
+    )
+    return random.uniform(0.0, exponential_cap)
+
+
+def _has_attempt_remaining(attempt_index: int) -> bool:
+    return attempt_index + 1 < settings.llm_retry_max_attempts
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in _RETRYABLE_STATUS_CODES
+
+
+def _is_retryable_transport_error(exc: httpx.HTTPError) -> bool:
+    return isinstance(
+        exc,
+        (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.PoolTimeout,
+        ),
+    )
+
+
+async def _sleep(delay_seconds: float) -> None:
+    await asyncio.sleep(delay_seconds)
+
+
+async def _wait_before_retry(
+    delay_seconds: float,
+    *,
+    attempt_index: int,
+    reason: str,
+) -> None:
+    logger.warning(
+        "retrying LLM upstream next_attempt=%s/%s delay_seconds=%.3f reason=%s",
+        attempt_index + 2,
+        settings.llm_retry_max_attempts,
+        delay_seconds,
+        reason,
+    )
+    await _sleep(delay_seconds)
+
+
 def _translate_httpx_error(exc: httpx.HTTPError) -> LLMUpstreamError:
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code == 429:
+            return LLMRateLimitError("LLM upstream rate limited request")
+        return LLMUpstreamError("LLM upstream returned an error status")
     if isinstance(exc, (httpx.ConnectTimeout, httpx.ConnectError)):
         return LLMUpstreamConnectionError("LLM upstream connection failed")
     if isinstance(exc, httpx.ReadTimeout):
@@ -65,28 +166,53 @@ async def _chat_with_client(
     messages: list[ChatMessage], *, client: httpx.AsyncClient
 ) -> ChatResult:
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
-
-    try:
-        response = await client.post(
-            url,
-            json=_build_ollama_payload(messages, stream=False),
-            timeout=_build_ollama_timeout(),
-        )
-        response.raise_for_status()
-        upstream = _OllamaChatResponse.model_validate(response.json())
-    except httpx.HTTPError as exc:
-        raise _translate_httpx_error(exc) from exc
-    except (
-        json.JSONDecodeError,
-        ValidationError,
-    ) as exc:
-        raise LLMUpstreamError("LLM upstream response is invalid") from exc
-
-    return ChatResult(
-        model=upstream.model,
-        message=upstream.message,
-        finish_reason=upstream.done_reason,
-    )
+    for attempt_index in range(settings.llm_retry_max_attempts):
+        try:
+            response = await client.post(
+                url,
+                json=_build_ollama_payload(messages, stream=False),
+                timeout=_build_ollama_timeout(),
+            )
+            if _is_retryable_status(response.status_code) and _has_attempt_remaining(
+                attempt_index
+            ):
+                retry_delay = _calculate_retry_delay(
+                    attempt_index,
+                    response=response,
+                )
+                if retry_delay is not None:
+                    await _wait_before_retry(
+                        retry_delay,
+                        attempt_index=attempt_index,
+                        reason=f"status={response.status_code}",
+                    )
+                    continue
+            response.raise_for_status()
+            upstream = _OllamaChatResponse.model_validate(response.json())
+            return ChatResult(
+                model=upstream.model,
+                message=upstream.message,
+                finish_reason=upstream.done_reason,
+            )
+        except httpx.HTTPError as exc:
+            if _is_retryable_transport_error(exc) and _has_attempt_remaining(
+                attempt_index
+            ):
+                retry_delay = _calculate_retry_delay(attempt_index)
+                if retry_delay is not None:
+                    await _wait_before_retry(
+                        retry_delay,
+                        attempt_index=attempt_index,
+                        reason=type(exc).__name__,
+                    )
+                    continue
+            raise _translate_httpx_error(exc) from exc
+        except (
+            json.JSONDecodeError,
+            ValidationError,
+        ) as exc:
+            raise LLMUpstreamError("LLM upstream response is invalid") from exc
+    raise LLMUpstreamError("LLM upstream retry loop exhausted")
 
 
 async def chat_with_llm(
@@ -102,29 +228,67 @@ async def _stream_chat_with_client(
     messages: list[ChatMessage], *, client: httpx.AsyncClient
 ) -> AsyncGenerator[StreamEvent, None]:
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+    for attempt_index in range(settings.llm_retry_max_attempts):
+        emitted_event = False
+        try:
+            retry_delay: float | None = None
+            async with client.stream(
+                "POST",
+                url,
+                json=_build_ollama_payload(messages, stream=True),
+                timeout=_build_ollama_timeout(),
+            ) as response:
+                if _is_retryable_status(
+                    response.status_code
+                ) and _has_attempt_remaining(attempt_index):
+                    retry_delay = _calculate_retry_delay(
+                        attempt_index,
+                        response=response,
+                    )
+                if retry_delay is None:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        events = parse_ollama_stream_line(line)
 
-    try:
-        async with client.stream(
-            "POST",
-            url,
-            json=_build_ollama_payload(messages, stream=True),
-            timeout=_build_ollama_timeout(),
-        ) as response:
-            response.raise_for_status()
+                        for event in events:
+                            emitted_event = True
+                            yield event
 
-            async for line in response.aiter_lines():
-                events = parse_ollama_stream_line(line)
-
-                for event in events:
-                    yield event
-
-                if any(isinstance(event, (DoneEvent, ErrorEvent)) for event in events):
+                        if any(
+                            isinstance(event, (DoneEvent, ErrorEvent))
+                            for event in events
+                        ):
+                            return
                     return
-    except asyncio.CancelledError:
-        logger.info("LLM upstream stream cancelled")
-        raise
-    except httpx.HTTPError as exc:
-        raise _translate_httpx_error(exc) from exc
+                await _wait_before_retry(
+                    retry_delay,
+                    attempt_index=attempt_index,
+                    reason=f"status={response.status_code}",
+                )
+
+        except asyncio.CancelledError:
+            logger.info("LLM upstream stream cancelled")
+            raise
+        except httpx.HTTPError as exc:
+            if (
+                not emitted_event
+                and _is_retryable_transport_error(exc)
+                and _has_attempt_remaining(attempt_index)
+            ):
+                retry_delay = _calculate_retry_delay(attempt_index)
+                if retry_delay is not None:
+                    try:
+                        await _wait_before_retry(
+                            retry_delay,
+                            attempt_index=(attempt_index),
+                            reason=(type(exc).__name__),
+                        )
+                    except asyncio.CancelledError:
+                        logger.info("LLM upstream stream cancelled")
+                        raise
+                    continue
+            raise _translate_httpx_error(exc) from exc
+    raise LLMUpstreamError("LLM upstream retry loop exhausted")
 
 
 async def stream_chat_with_llm(
