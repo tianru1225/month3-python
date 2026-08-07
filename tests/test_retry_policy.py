@@ -296,3 +296,100 @@ def test_stream_does_not_retry_after_first_event(
     assert slept == []
     assert len(bodies) == 1
     assert bodies[0].closed
+
+
+class TrackingRateLimitStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aiter__(
+        self,
+    ) -> AsyncIterator[bytes]:
+        yield b'{"error":"rate limited"}'
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_stream_closes_retry_response_before_sleep(
+    monkeypatch,
+) -> None:
+    request_count = 0
+    slept: list[float] = []
+    first_body = TrackingRateLimitStream()
+
+    def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+
+        if request_count == 1:
+            return httpx.Response(
+                429,
+                headers={
+                    "Retry-After": "2",
+                },
+                stream=first_body,
+            )
+
+        content = (
+            '{"message":{"content":"OK"},'
+            '"done":false}\n'
+            '{"message":{"content":""},'
+            '"done":true,'
+            '"done_reason":"stop"}\n'
+        )
+
+        return httpx.Response(
+            200,
+            headers={"content-type": ("application/x-ndjson")},
+            content=content,
+        )
+
+    async def fake_sleep(
+        delay_seconds: float,
+    ) -> None:
+        assert first_body.closed
+        slept.append(delay_seconds)
+
+    monkeypatch.setattr(
+        settings,
+        "llm_retry_max_attempts",
+        3,
+    )
+    monkeypatch.setattr(
+        settings,
+        "llm_retry_max_delay_seconds",
+        8.0,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_service._sleep",
+        fake_sleep,
+    )
+
+    async def run() -> list[str]:
+        transport = httpx.MockTransport(handler)
+
+        async with httpx.AsyncClient(
+            transport=transport,
+        ) as injected:
+            return [
+                event.type
+                async for event in (
+                    stream_chat_with_llm(
+                        _messages(),
+                        client=injected,
+                    )
+                )
+            ]
+
+    event_types = asyncio.run(run())
+
+    assert request_count == 2
+    assert slept == [2.0]
+    assert first_body.closed
+    assert event_types == [
+        "text_delta",
+        "done",
+    ]

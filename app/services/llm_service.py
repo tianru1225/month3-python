@@ -225,13 +225,19 @@ async def chat_with_llm(
 
 
 async def _stream_chat_with_client(
-    messages: list[ChatMessage], *, client: httpx.AsyncClient
+    messages: list[ChatMessage],
+    *,
+    client: httpx.AsyncClient,
 ) -> AsyncGenerator[StreamEvent, None]:
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+
     for attempt_index in range(settings.llm_retry_max_attempts):
         emitted_event = False
+
         try:
             retry_delay: float | None = None
+            retry_reason: str | None = None
+
             async with client.stream(
                 "POST",
                 url,
@@ -245,8 +251,13 @@ async def _stream_chat_with_client(
                         attempt_index,
                         response=response,
                     )
+
+                    if retry_delay is not None:
+                        retry_reason = f"status={response.status_code}"
+
                 if retry_delay is None:
                     response.raise_for_status()
+
                     async for line in response.aiter_lines():
                         events = parse_ollama_stream_line(line)
 
@@ -259,13 +270,17 @@ async def _stream_chat_with_client(
                             for event in events
                         ):
                             return
+
                     return
+
+            # Response 已退出上下文并释放连接池槽位。
+            if retry_delay is not None:
                 await _wait_before_retry(
                     retry_delay,
                     attempt_index=attempt_index,
-                    reason=f"status={response.status_code}",
+                    reason=retry_reason or "retryable_status",
                 )
-
+                continue
         except asyncio.CancelledError:
             logger.info("LLM upstream stream cancelled")
             raise
@@ -276,18 +291,22 @@ async def _stream_chat_with_client(
                 and _has_attempt_remaining(attempt_index)
             ):
                 retry_delay = _calculate_retry_delay(attempt_index)
+
                 if retry_delay is not None:
                     try:
                         await _wait_before_retry(
                             retry_delay,
-                            attempt_index=(attempt_index),
-                            reason=(type(exc).__name__),
+                            attempt_index=attempt_index,
+                            reason=type(exc).__name__,
                         )
                     except asyncio.CancelledError:
                         logger.info("LLM upstream stream cancelled")
                         raise
+
                     continue
+
             raise _translate_httpx_error(exc) from exc
+
     raise LLMUpstreamError("LLM upstream retry loop exhausted")
 
 
