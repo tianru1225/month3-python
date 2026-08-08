@@ -12,6 +12,13 @@ class LLMRateLimitError(LLMUpstreamError):
     retryable = True
 
 
+class LLMConcurrencyLimitError(LLMUpstreamError):
+    code = "LLM_CNCURRENCY_LIMIT"
+    public_message = "LLM request capacity is full"
+    http_status = 429
+    retryable = True
+
+
 class LLMUpstreamConnectionError(LLMUpstreamError):
     code = "LLM_UPSTREAM_CONNECTION_ERROR"
     public_message = "LLM upstream is unavailable"
