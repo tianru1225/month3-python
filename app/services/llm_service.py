@@ -11,6 +11,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
+from app.core.concurrency import ProviderConcurrencyLimiter, get_llm_limiter
 from app.schemas.llm_stream import DoneEvent, ErrorEvent, StreamEvent
 from app.schemas.chat import ChatMessage, ChatResult
 from app.services.errors import (
@@ -216,12 +217,17 @@ async def _chat_with_client(
 
 
 async def chat_with_llm(
-    messages: list[ChatMessage], *, client: httpx.AsyncClient | None = None
+    messages: list[ChatMessage],
+    *,
+    client: httpx.AsyncClient | None = None,
+    limiter: ProviderConcurrencyLimiter | None = None,
 ) -> ChatResult:
-    if client is not None:
-        return await _chat_with_client(messages, client=client)
-    async with httpx.AsyncClient() as owned_client:
-        return await _chat_with_client(messages, client=owned_client)
+    active_limiter = limiter if limiter is not None else get_llm_limiter()
+    async with active_limiter.acquire():
+        if client is not None:
+            return await _chat_with_client(messages, client=client)
+        async with httpx.AsyncClient() as owned_client:
+            return await _chat_with_client(messages, client=owned_client)
 
 
 async def _stream_chat_with_client(
@@ -311,12 +317,17 @@ async def _stream_chat_with_client(
 
 
 async def stream_chat_with_llm(
-    messages: list[ChatMessage], *, client: httpx.AsyncClient | None = None
+    messages: list[ChatMessage],
+    *,
+    client: httpx.AsyncClient | None = None,
+    limiter: ProviderConcurrencyLimiter | None = None,
 ) -> AsyncGenerator[StreamEvent, None]:
-    if client is not None:
-        async for event in _stream_chat_with_client(messages, client=client):
-            yield event
-        return
-    async with httpx.AsyncClient() as owned_client:
-        async for event in _stream_chat_with_client(messages, client=owned_client):
-            yield event
+    active_limiter = limiter if limiter is not None else get_llm_limiter()
+    async with active_limiter.acquire():
+        if client is not None:
+            async for event in _stream_chat_with_client(messages, client=client):
+                yield event
+            return
+        async with httpx.AsyncClient() as owned_client:
+            async for event in _stream_chat_with_client(messages, client=owned_client):
+                yield event
