@@ -13,7 +13,7 @@ class LLMRateLimitError(LLMUpstreamError):
 
 
 class LLMConcurrencyLimitError(LLMUpstreamError):
-    code = "LLM_CNCURRENCY_LIMIT"
+    code = "LLM_CONCURRENCY_LIMIT"
     public_message = "LLM request capacity is full"
     http_status = 429
     retryable = True

@@ -75,6 +75,8 @@ def test_queue_capacity_rejects_excess_requests() -> None:
                 raise AssertionError("capacity should reject")
 
         assert exc_info.value.http_status == 429
+        assert exc_info.value.code == "LLM_CONCURRENCY_LIMIT"
+        assert exc_info.value.public_message == "LLM request capacity is full"
         assert limiter.snapshot.active == 1
         assert limiter.snapshot.waiting == 1
 
