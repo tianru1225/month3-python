@@ -42,3 +42,13 @@ class LLMRequestTimeoutError(LLMUpstreamError):
 
 class LLMStreamProtocolError(LLMUpstreamError):
     """Raised when an upstream stream event cannot be parsed safely."""
+
+class StructuredOutputValidationError(LLMUpstreamError):
+    code = "STRUCTURED_OUTPUT_INVALID"
+    public_message = "Structured output validation failed"
+    http_status = 502
+    retryable = False
+    def __init__(self,message: str,*,repairs_used: int) -> None:
+        super().__init__(message)
+        self.repairs_used = repairs_used
+        
