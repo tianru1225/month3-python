@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = Field(default=2, ge=1, le=64)
     llm_max_waiting: int = Field(default=4, ge=0, le=1000)
 
+    llm_structured_max_repairs: int=Field(default=1,ge=0,le=3)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
