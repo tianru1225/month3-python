@@ -19,10 +19,7 @@ def valid_json() -> str:
     return json.dumps(
         {
             "title": "Learn async boundaries",
-            "objective": (
-                "Understand cancellation "
-                "and retry ownership"
-            ),
+            "objective": ("Understand cancellation and retry ownership"),
             "estimated_minutes": 60,
             "acceptance_criteria": [
                 "Explain timeout types",
@@ -42,17 +39,11 @@ def test_valid_output_is_accepted() -> None:
 
     assert result.outcome == "validated"
     assert result.repairs_used == 0
-    assert result.value.title == (
-        "Learn async boundaries"
-    )
+    assert result.value.title == ("Learn async boundaries")
 
-    schema = build_json_schema(
-        LearningPlanItem
-    )
+    schema = build_json_schema(LearningPlanItem)
     assert "title" in schema["properties"]
-    assert "estimated_minutes" in (
-        schema["properties"]
-    )
+    assert "estimated_minutes" in (schema["properties"])
 
 
 def test_invalid_output_is_repaired_once() -> None:
@@ -62,9 +53,7 @@ def test_invalid_output_is_repaired_once() -> None:
         candidate: str,
         instruction: str,
     ) -> str:
-        repair_calls.append(
-            (candidate, instruction)
-        )
+        repair_calls.append((candidate, instruction))
         assert "estimated_minutes" in instruction
         return valid_json()
 
@@ -94,9 +83,7 @@ def test_repair_budget_ends_in_final_failure() -> None:
         repair_calls += 1
         return '{"still":"invalid"}'
 
-    with pytest.raises(
-        StructuredOutputValidationError
-    ) as exc_info:
+    with pytest.raises(StructuredOutputValidationError) as exc_info:
         asyncio.run(
             validate_structured_output(
                 '{"invalid":true}',
@@ -107,7 +94,5 @@ def test_repair_budget_ends_in_final_failure() -> None:
         )
 
     assert repair_calls == 1
-    assert exc_info.value.code == (
-        "STRUCTURED_OUTPUT_INVALID"
-    )
+    assert exc_info.value.code == ("STRUCTURED_OUTPUT_INVALID")
     assert exc_info.value.repairs_used == 1

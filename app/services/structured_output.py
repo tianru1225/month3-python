@@ -24,9 +24,7 @@ ValidationOutcome = Literal[
 
 
 @dataclass(frozen=True)
-class StructuredOutputResult(
-    Generic[ModelT]
-):
+class StructuredOutputResult(Generic[ModelT]):
     value: ModelT
     repairs_used: int
     outcome: ValidationOutcome
@@ -65,21 +63,15 @@ def _validate_candidate(
     try:
         parsed: object = json.loads(raw_text)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            "candidate is not valid JSON"
-        ) from exc
+        raise ValueError("candidate is not valid JSON") from exc
 
     if not isinstance(parsed, dict):
-        raise ValueError(
-            "candidate JSON must be an object"
-        )
+        raise ValueError("candidate JSON must be an object")
 
     try:
         return model_type.model_validate(parsed)
     except ValidationError as exc:
-        raise ValueError(
-            str(exc)
-        ) from exc
+        raise ValueError(str(exc)) from exc
 
 
 async def validate_structured_output(
@@ -90,21 +82,15 @@ async def validate_structured_output(
     max_repairs: int | None = None,
 ) -> StructuredOutputResult[ModelT]:
     repair_limit = (
-        settings.llm_structured_max_repairs
-        if max_repairs is None
-        else max_repairs
+        settings.llm_structured_max_repairs if max_repairs is None else max_repairs
     )
 
     if repair_limit < 0:
-        raise ValueError(
-            "max_repairs must not be negative"
-        )
+        raise ValueError("max_repairs must not be negative")
 
     candidate = raw_text
 
-    for repairs_used in range(
-        repair_limit + 1
-    ):
+    for repairs_used in range(repair_limit + 1):
         try:
             value = _validate_candidate(
                 candidate,
@@ -112,9 +98,7 @@ async def validate_structured_output(
             )
 
             outcome: ValidationOutcome = (
-                "validated"
-                if repairs_used == 0
-                else "repaired"
+                "validated" if repairs_used == 0 else "repaired"
             )
 
             return StructuredOutputResult(
@@ -123,10 +107,7 @@ async def validate_structured_output(
                 outcome=outcome,
             )
         except ValueError as exc:
-            if (
-                repair is None
-                or repairs_used >= repair_limit
-            ):
+            if repair is None or repairs_used >= repair_limit:
                 raise StructuredOutputValidationError(
                     "structured output validation failed",
                     repairs_used=repairs_used,
