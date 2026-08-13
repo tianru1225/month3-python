@@ -104,7 +104,7 @@ class ModelProvider:
         self._complete_handler = complete
         self._stream_handler = stream
 
-    def _require_capabilities(self, request, *, streaming: bool) -> None:
+    def _require_capabilities(self, request: ModelRequest, *, streaming: bool) -> None:
         required = set(request.required_capabilities)
         if streaming:
             required.add(Capability.STREAMING)

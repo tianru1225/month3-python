@@ -201,7 +201,7 @@ def test_missing_capability_is_rejected_before_execution() -> None:
 
 def test_vendor_sdk_errors_do_not_cross_provider_boundary() -> None:
     class FakeVendorSDKError(Exception):
-        pass
+        """Represents an exception owned by a vendor SDK."""
 
     async def complete(
         request: ModelRequest,
