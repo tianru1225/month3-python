@@ -29,6 +29,14 @@ class Settings(BaseSettings):
 
     llm_structured_max_repairs: int = Field(default=1, ge=0, le=3)
 
+    dashscope_api_key: str = ""
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    qwen_model: str = "qwen3.8-max"
+    qwen_connect_timeout_seconds: float = 10.0
+    qwen_read_timeout_seconds: float = 240.0
+    qwen_write_timeout_seconds: float = 30.0
+    qwen_pool_timeout_seconds: float = 10.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
