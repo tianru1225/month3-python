@@ -1,4 +1,5 @@
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -12,6 +13,12 @@ from app.providers.contracts import (
     ModelUsage,
 )
 from app.schemas.chat import ChatMessage
+from app.schemas.llm_stream import (
+    DoneEvent,
+    StreamEvent,
+    TextDeltaEvent,
+    UsageEvent,
+)
 
 
 class QwenAdapter:
@@ -43,25 +50,35 @@ class QwenAdapter:
             capabilities=frozenset(
                 {
                     Capability.CHAT,
+                    Capability.STREAMING,
                     Capability.STRUCTURED_OUTPUT,
                     Capability.USAGE,
                 }
             ),
             complete=self._complete,
+            stream=self._stream,
         )
 
     @property
     def provider(self) -> ModelProvider:
         return self._provider
 
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
     def _build_payload(
         self,
         request: ModelRequest,
+        *,
+        stream: bool,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": request.model,
             "messages": [message.model_dump() for message in request.messages],
-            "stream": False,
+            "stream": stream,
         }
 
         if request.temperature is not None:
@@ -80,6 +97,11 @@ class QwenAdapter:
                 },
             }
 
+        if stream:
+            payload["stream_options"] = {
+                "include_usage": True,
+            }
+
         return payload
 
     async def _complete(
@@ -87,12 +109,12 @@ class QwenAdapter:
         request: ModelRequest,
     ) -> ModelResult:
         response = await self._client.post(
-            f"{self._base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
-            json=self._build_payload(request),
+            (f"{self._base_url.rstrip('/')}/chat/completions"),
+            headers=self._headers(),
+            json=self._build_payload(
+                request,
+                stream=False,
+            ),
             timeout=self._timeout,
         )
         response.raise_for_status()
@@ -102,7 +124,12 @@ class QwenAdapter:
             choice = body["choices"][0]
             message = choice["message"]
             content = message["content"]
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
+        except (
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as exc:
             raise ValueError(
                 "Qwen response does not match the chat completion shape"
             ) from exc
@@ -110,32 +137,139 @@ class QwenAdapter:
         if not isinstance(content, str):
             raise ValueError("Qwen message content must be a string")
 
-        usage = self._build_usage(body.get("usage"))
-
         structured_output: dict[str, Any] | None = None
 
         if request.response_schema is not None:
-            try:
-                parsed: object = json.loads(content)
-            except json.JSONDecodeError as exc:
-                raise ValueError("Qwen structured response is not valid JSON") from exc
-
-            if not isinstance(parsed, dict):
-                raise ValueError("Qwen structured response must be a JSON object")
-
-            structured_output = parsed
+            structured_output = self._parse_structured_output(content)
 
         return ModelResult(
             provider="qwen",
-            model=body.get("model", request.model),
+            model=body.get(
+                "model",
+                request.model,
+            ),
             message=ChatMessage(
                 role=message["role"],
                 content=content,
             ),
             finish_reason=choice.get("finish_reason"),
-            usage=usage,
+            usage=self._build_usage(body.get("usage")),
             structured_output=structured_output,
         )
+
+    async def _stream(
+        self,
+        request: ModelRequest,
+    ) -> AsyncIterator[StreamEvent]:
+        finish_reason: str | None = None
+        usage: ModelUsage | None = None
+
+        async with self._client.stream(
+            "POST",
+            (f"{self._base_url.rstrip('/')}/chat/completions"),
+            headers=self._headers(),
+            json=self._build_payload(
+                request,
+                stream=True,
+            ),
+            timeout=self._timeout,
+        ) as response:
+            response.raise_for_status()
+
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+
+                data = line[5:].strip()
+
+                if data == "[DONE]":
+                    break
+
+                try:
+                    payload = json.loads(data)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("Qwen stream event is not valid JSON") from exc
+
+                if not isinstance(payload, dict):
+                    raise ValueError("Qwen stream event must be an object")
+
+                if "error" in payload:
+                    raise ValueError("Qwen stream returned an error event")
+
+                if "usage" in payload:
+                    usage = self._build_usage(payload["usage"])
+
+                choices = payload.get(
+                    "choices",
+                    [],
+                )
+
+                if not isinstance(choices, list):
+                    raise ValueError("Qwen stream choices must be a list")
+
+                if not choices:
+                    continue
+
+                choice = choices[0]
+
+                if not isinstance(choice, dict):
+                    raise ValueError("Qwen stream choice must be an object")
+
+                delta = choice.get(
+                    "delta",
+                    {},
+                )
+
+                if not isinstance(delta, dict):
+                    raise ValueError("Qwen stream delta must be an object")
+
+                content = delta.get("content")
+
+                if content is not None:
+                    if not isinstance(
+                        content,
+                        str,
+                    ):
+                        raise ValueError("Qwen stream content must be a string")
+
+                    if content:
+                        yield TextDeltaEvent(text=content)
+
+                chunk_finish_reason = choice.get("finish_reason")
+
+                if chunk_finish_reason is not None:
+                    if not isinstance(
+                        chunk_finish_reason,
+                        str,
+                    ):
+                        raise ValueError("Qwen finish_reason must be a string")
+
+                    finish_reason = chunk_finish_reason
+
+        if finish_reason is None:
+            raise ValueError("Qwen stream ended without a finish reason")
+
+        if usage is not None:
+            yield UsageEvent(
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+            )
+
+        yield DoneEvent(finish_reason=finish_reason)
+
+    @staticmethod
+    def _parse_structured_output(
+        content: str,
+    ) -> dict[str, Any]:
+        try:
+            parsed: object = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Qwen structured response is not valid JSON") from exc
+
+        if not isinstance(parsed, dict):
+            raise ValueError("Qwen structured response must be a JSON object")
+
+        return parsed
 
     @staticmethod
     def _build_usage(
@@ -147,8 +281,14 @@ class QwenAdapter:
         if not isinstance(usage, dict):
             raise ValueError("Qwen usage must be an object")
 
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
+        prompt_tokens = usage.get(
+            "prompt_tokens",
+            0,
+        )
+        completion_tokens = usage.get(
+            "completion_tokens",
+            0,
+        )
 
         prompt_details = usage.get(
             "prompt_tokens_details",
