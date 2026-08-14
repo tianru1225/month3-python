@@ -135,6 +135,7 @@ def test_stream_endpoint_returns_ndjson(
             "type": "usage",
             "input_tokens": 8,
             "output_tokens": 2,
+            "cached_input_tokens": None,
         },
         {
             "type": "done",
@@ -176,6 +177,7 @@ def test_stream_endpoint_returns_terminal_error_event(
         "message": LLMUpstreamError.public_message,
         "retryable": LLMUpstreamError.retryable,
     }
+
 
 def test_stream_endpoint_requires_api_key(client) -> None:
     response = client.post(

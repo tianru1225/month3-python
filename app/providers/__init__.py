@@ -7,10 +7,14 @@ from app.providers.contracts import (
 )
 
 from app.providers.errors import (
+    ProviderAuthenticationError,
     ProviderCapabilityError,
     ProviderContractError,
     ProviderError,
     ProviderExecutionError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
 )
 
 __all__ = [
@@ -19,8 +23,12 @@ __all__ = [
     "ModelRequest",
     "ModelResult",
     "ModelUsage",
+    "ProviderAuthenticationError",
     "ProviderCapabilityError",
     "ProviderContractError",
     "ProviderError",
     "ProviderExecutionError",
+    "ProviderRateLimitError",
+    "ProviderTimeoutError",
+    "ProviderUnavailableError",
 ]

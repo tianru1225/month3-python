@@ -12,6 +12,13 @@ from app.providers.contracts import (
     ModelResult,
     ModelUsage,
 )
+from app.providers.errors import (
+    ProviderAuthenticationError,
+    ProviderExecutionError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+)
 from app.schemas.chat import ChatMessage
 from app.schemas.llm_stream import (
     DoneEvent,
@@ -108,16 +115,21 @@ class QwenAdapter:
         self,
         request: ModelRequest,
     ) -> ModelResult:
-        response = await self._client.post(
-            (f"{self._base_url.rstrip('/')}/chat/completions"),
-            headers=self._headers(),
-            json=self._build_payload(
-                request,
-                stream=False,
-            ),
-            timeout=self._timeout,
-        )
-        response.raise_for_status()
+        try:
+            response = await self._client.post(
+                (f"{self._base_url.rstrip('/')}/chat/completions"),
+                headers=self._headers(),
+                json=self._build_payload(
+                    request,
+                    stream=False,
+                ),
+                timeout=self._timeout,
+            )
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError(provider="qwen") from exc
+        except httpx.ConnectError as exc:
+            raise ProviderUnavailableError(provider="qwen") from exc
+        self._raise_for_status(response)
 
         try:
             body = response.json()
@@ -163,89 +175,92 @@ class QwenAdapter:
     ) -> AsyncIterator[StreamEvent]:
         finish_reason: str | None = None
         usage: ModelUsage | None = None
+        try:
+            async with self._client.stream(
+                "POST",
+                (f"{self._base_url.rstrip('/')}/chat/completions"),
+                headers=self._headers(),
+                json=self._build_payload(
+                    request,
+                    stream=True,
+                ),
+                timeout=self._timeout,
+            ) as response:
+                self._raise_for_status(response)
 
-        async with self._client.stream(
-            "POST",
-            (f"{self._base_url.rstrip('/')}/chat/completions"),
-            headers=self._headers(),
-            json=self._build_payload(
-                request,
-                stream=True,
-            ),
-            timeout=self._timeout,
-        ) as response:
-            response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
 
-            async for line in response.aiter_lines():
-                if not line or not line.startswith("data:"):
-                    continue
+                    data = line[5:].strip()
 
-                data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
 
-                if data == "[DONE]":
-                    break
+                    try:
+                        payload = json.loads(data)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError("Qwen stream event is not valid JSON") from exc
 
-                try:
-                    payload = json.loads(data)
-                except json.JSONDecodeError as exc:
-                    raise ValueError("Qwen stream event is not valid JSON") from exc
+                    if not isinstance(payload, dict):
+                        raise ValueError("Qwen stream event must be an object")
 
-                if not isinstance(payload, dict):
-                    raise ValueError("Qwen stream event must be an object")
+                    if "error" in payload:
+                        raise ValueError("Qwen stream returned an error event")
 
-                if "error" in payload:
-                    raise ValueError("Qwen stream returned an error event")
+                    if "usage" in payload:
+                        usage = self._build_usage(payload["usage"])
 
-                if "usage" in payload:
-                    usage = self._build_usage(payload["usage"])
+                    choices = payload.get(
+                        "choices",
+                        [],
+                    )
 
-                choices = payload.get(
-                    "choices",
-                    [],
-                )
+                    if not isinstance(choices, list):
+                        raise ValueError("Qwen stream choices must be a list")
 
-                if not isinstance(choices, list):
-                    raise ValueError("Qwen stream choices must be a list")
+                    if not choices:
+                        continue
 
-                if not choices:
-                    continue
+                    choice = choices[0]
 
-                choice = choices[0]
+                    if not isinstance(choice, dict):
+                        raise ValueError("Qwen stream choice must be an object")
 
-                if not isinstance(choice, dict):
-                    raise ValueError("Qwen stream choice must be an object")
+                    delta = choice.get(
+                        "delta",
+                        {},
+                    )
 
-                delta = choice.get(
-                    "delta",
-                    {},
-                )
+                    if not isinstance(delta, dict):
+                        raise ValueError("Qwen stream delta must be an object")
 
-                if not isinstance(delta, dict):
-                    raise ValueError("Qwen stream delta must be an object")
+                    content = delta.get("content")
 
-                content = delta.get("content")
+                    if content is not None:
+                        if not isinstance(
+                            content,
+                            str,
+                        ):
+                            raise ValueError("Qwen stream content must be a string")
 
-                if content is not None:
-                    if not isinstance(
-                        content,
-                        str,
-                    ):
-                        raise ValueError("Qwen stream content must be a string")
+                        if content:
+                            yield TextDeltaEvent(text=content)
 
-                    if content:
-                        yield TextDeltaEvent(text=content)
+                    chunk_finish_reason = choice.get("finish_reason")
 
-                chunk_finish_reason = choice.get("finish_reason")
+                    if chunk_finish_reason is not None:
+                        if not isinstance(
+                            chunk_finish_reason,
+                            str,
+                        ):
+                            raise ValueError("Qwen finish_reason must be a string")
 
-                if chunk_finish_reason is not None:
-                    if not isinstance(
-                        chunk_finish_reason,
-                        str,
-                    ):
-                        raise ValueError("Qwen finish_reason must be a string")
-
-                    finish_reason = chunk_finish_reason
-
+                        finish_reason = chunk_finish_reason
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError(provider="qwen") from exc
+        except httpx.ConnectError as exc:
+            raise ProviderUnavailableError(provider="qwen") from exc
         if finish_reason is None:
             raise ValueError("Qwen stream ended without a finish reason")
 
@@ -253,9 +268,24 @@ class QwenAdapter:
             yield UsageEvent(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
+                cached_input_tokens=(usage.cached_input_tokens),
             )
 
         yield DoneEvent(finish_reason=finish_reason)
+
+    @staticmethod
+    def _raise_for_status(response: httpx.Response) -> None:
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status_code = response.status_code
+            if status_code in {401, 403}:
+                raise (ProviderAuthenticationError(provider="qwen")) from exc
+            if status_code == 429:
+                raise ProviderRateLimitError(provider="qwen") from exc
+            if status_code >= 500:
+                raise ProviderUnavailableError(provider="qwen") from exc
+            raise ProviderExecutionError(provider="qwen") from exc
 
     @staticmethod
     def _parse_structured_output(

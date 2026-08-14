@@ -394,6 +394,7 @@ def test_adapter_maps_qwen_stream_events_and_usage() -> None:
         UsageEvent(
             input_tokens=12,
             output_tokens=7,
+            cached_input_tokens=2,
         ),
         DoneEvent(
             finish_reason="stop"

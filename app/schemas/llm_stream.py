@@ -11,6 +11,10 @@ class UsageEvent(BaseModel):
     type: Literal["usage"] = "usage"
     input_tokens: int | None = Field(default=None,ge=0)
     output_tokens: int | None = Field(default=None,ge=0)
+    cached_input_tokens: int | None = Field(
+        default=None,
+        ge=0,
+    )
 
 class DoneEvent(BaseModel):
     type: Literal["done"] = "done"
