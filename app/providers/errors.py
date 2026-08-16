@@ -11,9 +11,11 @@ class ProviderError(RuntimeError):
         message: str,
         *,
         provider: str,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.provider = provider
+        self.retry_after_seconds = retry_after_seconds
 
 
 class ProviderCapabilityError(ProviderError):
@@ -25,13 +27,12 @@ class ProviderCapabilityError(ProviderError):
         *,
         provider: str,
         missing_capabilities: Iterable[str],
-    ) -> None:
+    ):
         missing = tuple(sorted(set(missing_capabilities)))
         self.missing_capabilities = missing
-        names = ",".join(missing)
-
+        name = ",".join(missing)
         super().__init__(
-            (f"provider not support capabilities:{names}"),
+            f"provider not support capabilities:{name}",
             provider=provider,
         )
 
@@ -60,10 +61,12 @@ class ProviderRateLimitError(ProviderError):
         self,
         *,
         provider: str,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(
             "model provider rate limit exceeded",
             provider=provider,
+            retry_after_seconds=retry_after_seconds,
         )
 
 
@@ -81,6 +84,14 @@ class ProviderTimeoutError(ProviderError):
             "model provider request timed out",
             provider=provider,
         )
+
+
+class ProviderGenerationTimeoutError(ProviderError):
+    code = "PROVIDER_GENERATION_TIMEOUT"
+    public_message = "Model provider generation timed out"
+
+    def __init__(self, *, provider: str) -> None:
+        super().__init__("model provider generation timed out", provider=provider)
 
 
 class ProviderUnavailableError(ProviderError):

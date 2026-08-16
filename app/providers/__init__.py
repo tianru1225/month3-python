@@ -5,13 +5,13 @@ from app.providers.contracts import (
     ModelResult,
     ModelUsage,
 )
-
 from app.providers.errors import (
     ProviderAuthenticationError,
     ProviderCapabilityError,
     ProviderContractError,
     ProviderError,
     ProviderExecutionError,
+    ProviderGenerationTimeoutError,
     ProviderRateLimitError,
     ProviderTimeoutError,
     ProviderUnavailableError,
@@ -28,6 +28,7 @@ __all__ = [
     "ProviderContractError",
     "ProviderError",
     "ProviderExecutionError",
+    "ProviderGenerationTimeoutError",
     "ProviderRateLimitError",
     "ProviderTimeoutError",
     "ProviderUnavailableError",

@@ -1,4 +1,5 @@
-from collections.abc import Awaitable, Callable, AsyncIterator
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import aclosing
 from enum import Enum
 from typing import Any, TypeAlias
 
@@ -77,7 +78,10 @@ class ModelResult(BaseModel):
 
 CompleteHandler: TypeAlias = Callable[[ModelRequest], Awaitable[ModelResult]]
 
-StreamHandler: TypeAlias = Callable[[ModelRequest], AsyncIterator[StreamEvent]]
+StreamHandler: TypeAlias = Callable[
+    [ModelRequest],
+    AsyncGenerator[StreamEvent, None],
+]
 
 _STREAM_EVENT_TYPES = (
     TextDeltaEvent,
@@ -138,7 +142,7 @@ class ModelProvider:
     def stream(
         self,
         request: ModelRequest,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         self._require_capabilities(request, streaming=True)
         if self._stream_handler is None:
             raise ProviderContractError(
@@ -150,23 +154,25 @@ class ModelProvider:
         self,
         request: ModelRequest,
         handler: StreamHandler,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         terminal_seen = False
         try:
-            async for event in handler(request):
-                if terminal_seen:
-                    raise ProviderContractError(
-                        "provider emitted an event after a terminal event",
-                        provider=self.name,
-                    )
-                if not isinstance(event, _STREAM_EVENT_TYPES):
-                    raise ProviderContractError(
-                        "provider emitted an invalid stream event", provider=self.name
-                    )
-                yield event
+            async with aclosing(handler(request)) as stream:
+                async for event in stream:
+                    if terminal_seen:
+                        raise ProviderContractError(
+                            "provider emitted an event after a terminal event",
+                            provider=self.name,
+                        )
+                    if not isinstance(event, _STREAM_EVENT_TYPES):
+                        raise ProviderContractError(
+                            "provider emitted an invalid stream event",
+                            provider=self.name,
+                        )
+                    yield event
 
-                if isinstance(event, (DoneEvent, ErrorEvent)):
-                    terminal_seen = True
+                    if isinstance(event, (DoneEvent, ErrorEvent)):
+                        terminal_seen = True
         except ProviderError:
             raise
         except Exception as exc:
