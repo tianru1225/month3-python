@@ -41,7 +41,11 @@ class QwenAdapter:
         base_url: str | None = None,
         timeout: httpx.Timeout | None = None,
     ) -> None:
-        configured_key = settings.dashscope_api_key if api_key is None else api_key
+        configured_key = (
+            settings.dashscope_api_key.get_secret_value()
+            if api_key is None
+            else api_key
+        )
         if not configured_key.strip():
             raise ValueError("DASHSCOPE_API_KEY must not be empty")
 
@@ -92,7 +96,7 @@ class QwenAdapter:
 
         if request.temperature is not None:
             payload["temperature"] = request.temperature
-        if request.max_output_tokens is not None:
+        if request.max_output_tokens is not None and request.response_schema is None:
             payload["max_tokens"] = request.max_output_tokens
         if request.response_schema is not None:
             payload["response_format"] = {

@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     llm_structured_max_repairs: int = Field(default=1, ge=0, le=3)
 
-    dashscope_api_key: str = ""
+    dashscope_api_key: SecretStr = SecretStr("")
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen3.8-max"
     qwen_connect_timeout_seconds: float = 10.0
@@ -30,8 +30,7 @@ class Settings(BaseSettings):
     qwen_max_output_tokens: int = Field(default=600, ge=1, le=32768)
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
+        env_file=".env", env_file_encoding="utf-8", validate_assignment=True
     )
 
 
