@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: month3-api:day086
+    image: month3-api:day116
     container_name: month3-api
     ports:
       - "127.0.0.1:8001:8000"
@@ -13,18 +13,36 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_DB: "0"
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-month3}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-month3}
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
-    dns:
-      - 100.100.100.100
-      - 223.5.5.5
   redis:
     image: redis:7
     container_name: month3-redis
     restart: unless-stopped
+  postgres:
+    image: postgres:17-alpine
+    container_name: month3-postgres 
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-month3}
+      POSTGRES_USER: ${POSTGRES_USER:-month3}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
   worker:
-      image: month3-api:day086
+      image: month3-api:day116
       container_name: month3-worker
       command: python -m app.worker
       volumes:
@@ -35,8 +53,12 @@ services:
         REDIS_HOST: redis
         REDIS_PORT: "6379"
         REDIS_DB: "0"
+        DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-month3}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-month3}
       depends_on:
-        - redis
+        postgres:
+          condition: service_healthy
+        redis:
+          condition: service_started
       restart: unless-stopped
   nginx:
     image: nginx:1.28-alpine
@@ -48,3 +70,6 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+
+volumes:
+  postgres_data:
