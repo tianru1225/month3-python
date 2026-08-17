@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
 
+    database_url: SecretStr = SecretStr("sqlite:///./dev.db")
+
     llm_retry_max_attempts: int = Field(default=3, ge=1, le=5)
     llm_retry_base_delay_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
     llm_retry_max_delay_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
@@ -30,7 +32,7 @@ class Settings(BaseSettings):
     qwen_max_output_tokens: int = Field(default=600, ge=1, le=32768)
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", validate_assignment=True
+        env_file=".env", env_file_encoding="utf-8", validate_assignment=True,extra="ignore"
     )
 
 

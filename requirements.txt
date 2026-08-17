@@ -57,3 +57,5 @@ uvloop==0.22.1
 watchfiles==1.2.0
 websockets==16.0
 wrapt==2.2.1
+psycopg==3.3.4
+psycopg-binary==3.3.4
