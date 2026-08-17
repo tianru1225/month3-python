@@ -32,7 +32,10 @@ class Settings(BaseSettings):
     qwen_max_output_tokens: int = Field(default=600, ge=1, le=32768)
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", validate_assignment=True,extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        validate_assignment=True,
+        extra="ignore",
     )
 
 
