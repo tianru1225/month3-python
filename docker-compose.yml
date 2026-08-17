@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
   postgres:
     image: postgres:17-alpine
-    container_name: month3-postgres 
+    container_name: month3-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-month3}
       POSTGRES_USER: ${POSTGRES_USER:-month3}
