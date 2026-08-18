@@ -23,3 +23,11 @@ def create_user(db: Session, *, username: str, email: str, password_hash: str) -
     db.commit()
     db.refresh(user)
     return user
+
+
+def get_user_by_identifier(db: Session, identifier: str) -> User | None:
+    return (
+        db.query(User)
+        .filter((User.username == identifier) | (User.email == identifier))
+        .first()
+    )

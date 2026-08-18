@@ -6,7 +6,6 @@ from app.core.security import hash_password
 from app.models.user import User
 from app.repositories.user_repository import (
     create_user,
-    get_user_by_id,
     get_user_by_username_or_email,
 )
 from app.schemas.user import UserCreate
@@ -39,13 +38,3 @@ def create_user_or_raise(db: Session, payload: UserCreate) -> User:
     except IntegrityError:
         db.rollback()
         raise _user_exists_error() from None
-
-
-def get_user_or_raise(db: Session, user_id: int) -> User:
-    user = get_user_by_id(db, user_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "USER_NOT_FOUND", "message": f"user {user_id} not found"},
-        )
-    return user

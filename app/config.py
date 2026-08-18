@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     qwen_pool_timeout_seconds: float = 10.0
     qwen_max_output_tokens: int = Field(default=600, ge=1, le=32768)
 
+    jwt_secret_key: SecretStr = SecretStr("")
+    jwt_access_token_expire_minutes: int = Field(default=30, ge=1, le=1440)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
