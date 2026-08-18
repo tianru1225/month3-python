@@ -7,22 +7,23 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base
 from app.deps.db import get_db
 from app.main import app
+from app.config import settings
 
 
 @pytest.fixture
 def db_session():
     engine = create_engine(
         "sqlite://",
-        connect_args = {"check_same_thread": False},
-        poolclass = StaticPool,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
-    
-    Base.metadata.create_all(bind = engine)
+
+    Base.metadata.create_all(bind=engine)
 
     TestingSessionLocal = sessionmaker(
-        autocommit = False,
-        autoflush = False,
-        bind = engine,
+        autocommit=False,
+        autoflush=False,
+        bind=engine,
     )
 
     db = TestingSessionLocal()
@@ -31,6 +32,7 @@ def db_session():
     finally:
         db.close()
 
+
 @pytest.fixture
 def client(db_session):
     def override_get_db():
@@ -38,6 +40,15 @@ def client(db_session):
             yield db_session
         finally:
             pass
+
     app.dependency_overrides[get_db] = override_get_db
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def configured_auth(monkeypatch):
+    monkeypatch.setattr(
+        settings, "jwt_secret_key", "day119-test-jwt-secret-32-chars-long"
+    )
+    monkeypatch.setattr(settings, "jwt_access_token_expire_minutes", 30)

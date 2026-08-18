@@ -14,7 +14,6 @@ def test_register_user_hashes_password_and_returns_public_fields(
     db_session,
 ) -> None:
     password = "day118-secure-password"
-
     response = client.post(
         "/users",
         json={
@@ -51,7 +50,6 @@ def test_register_user_hashes_password_and_returns_public_fields(
 )
 def test_register_user_rejects_missing_or_short_password(client, payload) -> None:
     response = client.post("/users", json=payload)
-
     assert response.status_code == 422
 
 
@@ -100,8 +98,8 @@ def test_database_rejects_unknown_user_status(db_session) -> None:
     db_session.rollback()
 
 
-def test_get_user_not_found_returns_404(client) -> None:
+def test_user_query_requires_bearer_token(client) -> None:
     response = client.get("/users/999999")
 
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "USER_NOT_FOUND"
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "AUTH_REQUIRED"

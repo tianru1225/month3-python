@@ -4,14 +4,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.schemas.user import UserCreate
 from app.services import user_service
-from app.services.user_service import create_user_or_raise, get_user_or_raise
+from app.services.user_service import create_user_or_raise
 
 
-def user_payload(
-    *,
-    username: str,
-    email: str,
-) -> UserCreate:
+def user_payload(*, username: str, email: str) -> UserCreate:
     return UserCreate(
         username=username,
         email=email,
@@ -85,11 +81,3 @@ def test_create_user_or_raise_handles_unique_constraint_race(monkeypatch) -> Non
     assert db.rolled_back is True
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "USER_ALREADY_EXISTS"
-
-
-def test_get_user_or_raise_rejects_missing_user(db_session) -> None:
-    with pytest.raises(HTTPException) as exc_info:
-        get_user_or_raise(db_session, 999999)
-
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail["code"] == "USER_NOT_FOUND"

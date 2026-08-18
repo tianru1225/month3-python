@@ -67,7 +67,20 @@ def test_create_user_then_get_user_roundtrip(client):
     assert create_response.status_code == 201
     created_user = create_response.json()
 
-    get_response = client.get(f"/users/{created_user['id']}")
+    login_response = client.post(
+        "/auth/login",
+        json={
+            "identifier": "day088-user",
+            "password": "day118-regression-password",
+        },
+    )
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+
+    get_response = client.get(
+        f"/users/{created_user['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert get_response.status_code == 200
     fetched_user = get_response.json()
 
@@ -135,15 +148,16 @@ def test_openapi_contains_core_paths(client):
     response = client.get("/openapi.json")
 
     assert response.status_code == 200
-    body = response.json()
-    paths = body["paths"]
+    paths = response.json()["paths"]
     assert "/health" in paths
     assert "/debug/request-id" in paths
     assert "/boom" in paths
     assert "/items" in paths
     assert "/items/{item_id}" in paths
     assert "/users" in paths
+    assert "/users/me" in paths
     assert "/users/{user_id}" in paths
+    assert "/auth/login" in paths
     assert "/tasks/audit" in paths
 
 
@@ -158,5 +172,7 @@ def test_openapi_core_paths_have_expected_methods(client):
     assert "post" in paths["/items"]
     assert "get" in paths["/items/{item_id}"]
     assert "post" in paths["/users"]
+    assert "post" in paths["/auth/login"]
+    assert "get" in paths["/users/me"]
     assert "get" in paths["/users/{user_id}"]
     assert "post" in paths["/tasks/audit"]
