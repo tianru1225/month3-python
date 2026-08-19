@@ -5,40 +5,44 @@ from sqlalchemy import select
 from app.models.user import User
 
 
-def register(client, username: str, email: str, password: str = "day119-password"):
+def register(
+    client,
+    username: str,
+    password: str = "day119-password",
+):
     return client.post(
         "/users",
-        json={"username": username, "email": email, "password": password},
+        json={"username": username, "password": password},
     )
 
 
-def login(client, identifier: str, password: str = "day119-password"):
+def login(
+    client,
+    username: str,
+    password: str = "day119-password",
+):
     return client.post(
         "/auth/login",
-        json={"identifier": identifier, "password": password},
+        json={"username": username, "password": password},
     )
 
 
-def test_login_by_username_and_email_returns_bearer_token(client) -> None:
-    assert register(client, "alice", "alice@example.com").status_code == 201
+def test_login_by_username_returns_bearer_token(client) -> None:
+    assert register(client, "alice").status_code == 201
 
-    username_response = login(client, "alice")
-    email_response = login(client, "alice@example.com")
+    response = login(client, "alice")
 
-    assert username_response.status_code == 200
-    assert email_response.status_code == 200
-
-    for response in (username_response, email_response):
-        body = response.json()
-        assert body["token_type"] == "bearer"
-        assert body["access_token"]
-        assert body["expires_in"] == 1800
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "bearer"
+    assert body["access_token"]
+    assert body["expires_in"] == 1800
 
 
 def test_unknown_user_and_wrong_password_have_same_401_contract(client) -> None:
-    assert register(client, "alice", "alice@example.com").status_code == 201
+    assert register(client, "alice").status_code == 201
 
-    unknown_response = login(client, "nobody@example.com")
+    unknown_response = login(client, "nobody")
     wrong_password_response = login(client, "alice", "wrong-password")
 
     assert unknown_response.status_code == 401
@@ -46,11 +50,12 @@ def test_unknown_user_and_wrong_password_have_same_401_contract(client) -> None:
     assert unknown_response.json()["detail"] == wrong_password_response.json()["detail"]
     assert unknown_response.json()["detail"]["code"] == "INVALID_CREDENTIALS"
     assert unknown_response.headers["www-authenticate"] == "Bearer"
+    assert wrong_password_response.headers["www-authenticate"] == "Bearer"
 
 
 def test_disabled_and_locked_users_cannot_login(client, db_session) -> None:
-    assert register(client, "disabled", "disabled@example.com").status_code == 201
-    assert register(client, "locked", "locked@example.com").status_code == 201
+    assert register(client, "disabled").status_code == 201
+    assert register(client, "locked").status_code == 201
 
     disabled = db_session.scalar(select(User).where(User.username == "disabled"))
     locked = db_session.scalar(select(User).where(User.username == "locked"))
@@ -74,15 +79,7 @@ def test_login_does_not_log_password_or_token(client, caplog) -> None:
     password = "day119-password-not-in-logs"
 
     with caplog.at_level(logging.INFO):
-        assert (
-            register(
-                client,
-                "loguser",
-                "loguser@example.com",
-                password,
-            ).status_code
-            == 201
-        )
+        assert register(client, "loguser", password).status_code == 201
         response = login(client, "loguser", password)
 
     assert response.status_code == 200

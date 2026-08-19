@@ -6,7 +6,7 @@ from app.core.security import hash_password
 from app.models.user import User
 from app.repositories.user_repository import (
     create_user,
-    get_user_by_username_or_email,
+    get_user_by_username,
 )
 from app.schemas.user import UserCreate
 
@@ -22,18 +22,16 @@ def _user_exists_error() -> HTTPException:
 
 
 def create_user_or_raise(db: Session, payload: UserCreate) -> User:
-    email = str(payload.email)
-    existing = get_user_by_username_or_email(
+    existing = get_user_by_username(
         db,
-        username=payload.username,
-        email=email,
+        payload.username,
     )
     if existing is not None:
         raise _user_exists_error()
     password_hash = hash_password(payload.password.get_secret_value())
     try:
         return create_user(
-            db, username=payload.username, email=email, password_hash=password_hash
+            db, username=payload.username, password_hash=password_hash
         )
     except IntegrityError:
         db.rollback()

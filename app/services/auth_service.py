@@ -10,7 +10,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import UserStatus
-from app.repositories.user_repository import get_user_by_identifier
+from app.repositories.user_repository import get_user_by_username
 from app.schemas.auth import LoginRequest, TokenResponse
 
 
@@ -26,7 +26,7 @@ def _invalid_credentials_error() -> HTTPException:
 
 
 def login_user_or_raise(db: Session, payload: LoginRequest) -> TokenResponse:
-    user = get_user_by_identifier(db, payload.identifier)
+    user = get_user_by_username(db, payload.username)
     password = payload.password.get_secret_value()
     password_hash = user.password_hash if user is not None else "!unknown-user"
 

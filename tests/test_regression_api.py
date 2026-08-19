@@ -60,7 +60,6 @@ def test_create_user_then_get_user_roundtrip(client):
         "/users",
         json={
             "username": "day088-user",
-            "email": "day088@example.com",
             "password": "day118-regression-password",
         },
     )
@@ -70,7 +69,7 @@ def test_create_user_then_get_user_roundtrip(client):
     login_response = client.post(
         "/auth/login",
         json={
-            "identifier": "day088-user",
+            "username": "day088-user",
             "password": "day118-regression-password",
         },
     )
@@ -86,9 +85,9 @@ def test_create_user_then_get_user_roundtrip(client):
 
     assert fetched_user["id"] == created_user["id"]
     assert fetched_user["username"] == "day088-user"
-    assert fetched_user["email"] == "day088@example.com"
     assert fetched_user["status"] == "ACTIVE"
     assert fetched_user["created_at"]
+    assert "email" not in fetched_user
     assert "password" not in fetched_user
     assert "password_hash" not in fetched_user
 
@@ -98,7 +97,6 @@ def test_create_user_duplicate_username_returns_error_contract(client):
         "/users",
         json={
             "username": "day088-dup",
-            "email": "day088-dup-1@example.com",
             "password": "day118-regression-password",
         },
     )
@@ -108,36 +106,9 @@ def test_create_user_duplicate_username_returns_error_contract(client):
         "/users",
         json={
             "username": "day088-dup",
-            "email": "day088-dup-2@example.com",
             "password": "day118-regression-password",
         },
     )
-    assert duplicate_response.status_code == 400
-    body = duplicate_response.json()
-
-    assert body["detail"]["code"] == "USER_ALREADY_EXISTS"
-
-
-def test_create_user_duplicate_email_returns_error_contract(client):
-    first_response = client.post(
-        "/users",
-        json={
-            "username": "day088-email-1",
-            "email": "day088-email@example.com",
-            "password": "day118-regression-password",
-        },
-    )
-    assert first_response.status_code == 201
-
-    duplicate_response = client.post(
-        "/users",
-        json={
-            "username": "day088-email-2",
-            "email": "day088-email@example.com",
-            "password": "day118-regression-password",
-        },
-    )
-
     assert duplicate_response.status_code == 400
     body = duplicate_response.json()
 
@@ -176,3 +147,28 @@ def test_openapi_core_paths_have_expected_methods(client):
     assert "get" in paths["/users/me"]
     assert "get" in paths["/users/{user_id}"]
     assert "post" in paths["/tasks/audit"]
+
+
+def test_openapi_user_and_login_schemas_are_username_only(client):
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    schemas = response.json()["components"]["schemas"]
+
+    user_create = schemas["UserCreate"]
+    login_request = schemas["LoginRequest"]
+    user_response = schemas["UserResponse"]
+
+    assert set(user_create["properties"]) == {"username", "password"}
+    assert set(user_create["required"]) == {"username", "password"}
+
+    assert set(login_request["properties"]) == {"username", "password"}
+    assert set(login_request["required"]) == {"username", "password"}
+
+    assert set(user_response["properties"]) == {
+        "id",
+        "username",
+        "status",
+        "created_at",
+    }
+    assert "email" not in user_response["properties"]

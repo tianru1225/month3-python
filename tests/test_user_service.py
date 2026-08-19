@@ -7,10 +7,9 @@ from app.services import user_service
 from app.services.user_service import create_user_or_raise
 
 
-def user_payload(*, username: str, email: str) -> UserCreate:
+def user_payload(*, username: str) -> UserCreate:
     return UserCreate(
         username=username,
-        email=email,
         password="day118-valid-password",
     )
 
@@ -18,29 +17,13 @@ def user_payload(*, username: str, email: str) -> UserCreate:
 def test_create_user_or_raise_rejects_duplicate_username(db_session) -> None:
     create_user_or_raise(
         db_session,
-        user_payload(username="alice", email="alice@example.com"),
+        user_payload(username="alice"),
     )
 
     with pytest.raises(HTTPException) as exc_info:
         create_user_or_raise(
             db_session,
-            user_payload(username="alice", email="alice2@example.com"),
-        )
-
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["code"] == "USER_ALREADY_EXISTS"
-
-
-def test_create_user_or_raise_rejects_duplicate_email(db_session) -> None:
-    create_user_or_raise(
-        db_session,
-        user_payload(username="alice", email="alice@example.com"),
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        create_user_or_raise(
-            db_session,
-            user_payload(username="bob", email="alice@example.com"),
+            user_payload(username="alice"),
         )
 
     assert exc_info.value.status_code == 400
@@ -58,7 +41,7 @@ def test_create_user_or_raise_handles_unique_constraint_race(monkeypatch) -> Non
 
     monkeypatch.setattr(
         user_service,
-        "get_user_by_username_or_email",
+        "get_user_by_username",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -75,7 +58,7 @@ def test_create_user_or_raise_handles_unique_constraint_race(monkeypatch) -> Non
     with pytest.raises(HTTPException) as exc_info:
         create_user_or_raise(
             db,  # type: ignore[arg-type]
-            user_payload(username="alice", email="alice@example.com"),
+            user_payload(username="alice"),
         )
 
     assert db.rolled_back is True

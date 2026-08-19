@@ -1,14 +1,12 @@
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, StringConstraints
+from pydantic import BaseModel, Field, SecretStr
 
-LoginIdentifier = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
-]
+from app.schemas.user import Username
 
 
 class LoginRequest(BaseModel):
-    identifier: LoginIdentifier
+    username: Username
     password: SecretStr = Field(min_length=1, max_length=128)
 
 

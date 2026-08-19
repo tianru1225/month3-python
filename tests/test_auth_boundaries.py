@@ -7,12 +7,11 @@ from app.core.security import create_access_token
 from app.models.user import User
 
 
-def register_and_login(client, username: str, email: str) -> tuple[int, str]:
+def register_and_login(client, username: str) -> tuple[int, str]:
     created_response = client.post(
         "/users",
         json={
             "username": username,
-            "email": email,
             "password": "day119-password",
         },
     )
@@ -21,7 +20,7 @@ def register_and_login(client, username: str, email: str) -> tuple[int, str]:
     login_response = client.post(
         "/auth/login",
         json={
-            "identifier": username,
+            "username": username,
             "password": "day119-password",
         },
     )
@@ -35,7 +34,7 @@ def bearer(token: str) -> dict[str, str]:
 
 
 def test_current_user_and_own_user_route_work(client) -> None:
-    user_id, token = register_and_login(client, "alice", "alice@example.com")
+    user_id, token = register_and_login(client, "alice")
 
     me_response = client.get("/users/me", headers=bearer(token))
     own_response = client.get(f"/users/{user_id}", headers=bearer(token))
@@ -43,11 +42,12 @@ def test_current_user_and_own_user_route_work(client) -> None:
     assert me_response.status_code == 200
     assert own_response.status_code == 200
     assert me_response.json() == own_response.json()
+    assert set(me_response.json()) == {"id", "username", "status", "created_at"}
 
 
 def test_user_cannot_read_another_user(client) -> None:
-    _, alice_token = register_and_login(client, "alice", "alice@example.com")
-    bob_id, _ = register_and_login(client, "bob", "bob@example.com")
+    _, alice_token = register_and_login(client, "alice")
+    bob_id, _ = register_and_login(client, "bob")
 
     response = client.get(f"/users/{bob_id}", headers=bearer(alice_token))
 
@@ -59,7 +59,7 @@ def test_signed_token_is_rejected_after_user_is_disabled(
     client,
     db_session,
 ) -> None:
-    user_id, token = register_and_login(client, "alice", "alice@example.com")
+    user_id, token = register_and_login(client, "alice")
     user = db_session.scalar(select(User).where(User.id == user_id))
     assert user is not None
 
@@ -90,7 +90,7 @@ def test_missing_expired_and_invalid_bearer_tokens_are_401(client) -> None:
 
 
 def test_jwt_cannot_replace_api_key_and_api_key_cannot_replace_jwt(client) -> None:
-    _, token = register_and_login(client, "alice", "alice@example.com")
+    _, token = register_and_login(client, "alice")
 
     item_response = client.get("/items/1", headers=bearer(token))
     user_response = client.get(

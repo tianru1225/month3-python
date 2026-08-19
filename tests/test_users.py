@@ -18,18 +18,19 @@ def test_register_user_hashes_password_and_returns_public_fields(
         "/users",
         json={
             "username": "  bob  ",
-            "email": "bob@example.com",
             "password": password,
         },
     )
 
     assert response.status_code == 201
     body = response.json()
-    assert set(body) == {"id", "username", "email", "status", "created_at"}
+    assert set(body) == {"id", "username", "status", "created_at"}
     assert body["username"] == "bob"
-    assert body["email"] == "bob@example.com"
     assert body["status"] == "ACTIVE"
     assert body["created_at"]
+    assert "email" not in body
+    assert "password" not in body
+    assert "password_hash" not in body
 
     user = db_session.scalar(select(User).where(User.username == "bob"))
     assert user is not None
@@ -40,10 +41,9 @@ def test_register_user_hashes_password_and_returns_public_fields(
 @pytest.mark.parametrize(
     "payload",
     [
-        {"username": "bob", "email": "bob@example.com"},
+        {"username": "bob"},
         {
             "username": "bob",
-            "email": "bob@example.com",
             "password": "short",
         },
     ],
@@ -57,7 +57,6 @@ def test_user_create_redacts_password_from_representation() -> None:
     password = "day118-secret-password"
     payload = UserCreate(
         username="alice",
-        email="alice@example.com",
         password=password,
     )
 
@@ -73,7 +72,6 @@ def test_registration_does_not_log_password(client, caplog) -> None:
             "/users",
             json={
                 "username": "log-check",
-                "email": "log-check@example.com",
                 "password": password,
             },
         )
@@ -86,7 +84,6 @@ def test_database_rejects_unknown_user_status(db_session) -> None:
     db_session.add(
         User(
             username="invalid-status",
-            email="invalid-status@example.com",
             password_hash="test-password-hash",
             status="UNKNOWN",
         )
