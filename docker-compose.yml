@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: month3-api:day116
+    image: month3-api:day120
     container_name: month3-api
     ports:
       - "127.0.0.1:8001:8000"
@@ -42,7 +42,7 @@ services:
       retries: 10
     restart: unless-stopped
   worker:
-      image: month3-api:day116
+      image: month3-api:day120
       container_name: month3-worker
       command: python -m app.worker
       volumes:
