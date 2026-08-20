@@ -84,3 +84,5 @@ def test_structured_request_omits_max_tokens() -> None:
     }
     assert "max_tokens" not in captured_payload
     assert structured_output == {"title": "Async streams"}
+    assert "max_tokens" not in captured_payload
+    assert "max_completion_tokens" not in captured_payload

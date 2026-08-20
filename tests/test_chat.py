@@ -130,7 +130,8 @@ def test_service_sends_qwen_request(monkeypatch) -> None:
     assert captured["authorization"] == "Bearer test-key"
     assert captured["payload"]["model"] == settings.qwen_model
     assert captured["payload"]["stream"] is False
-    assert captured["payload"]["max_tokens"] == 300
+    assert captured["payload"]["max_completion_tokens"] == 300
+    assert "max_tokens" not in captured["payload"]
     assert captured["timeout"] == {
         "connect": settings.qwen_connect_timeout_seconds,
         "read": settings.qwen_read_timeout_seconds,

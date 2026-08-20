@@ -24,9 +24,7 @@ from app.schemas.llm_stream import (
 
 def build_request(
     *,
-    response_schema: (
-        dict[str, Any] | None
-    ) = None,
+    response_schema: (dict[str, Any] | None) = None,
 ) -> ModelRequest:
     capabilities = {
         Capability.CHAT,
@@ -34,23 +32,17 @@ def build_request(
     }
 
     if response_schema is not None:
-        capabilities.add(
-            Capability.STRUCTURED_OUTPUT
-        )
+        capabilities.add(Capability.STRUCTURED_OUTPUT)
 
     return ModelRequest(
         model="qwen3.8-max",
         messages=[
             ChatMessage(
                 role="user",
-                content=(
-                    "Return a learning task."
-                ),
+                content=("Return a learning task."),
             )
         ],
-        required_capabilities=frozenset(
-            capabilities
-        ),
+        required_capabilities=frozenset(capabilities),
         response_schema=response_schema,
         max_output_tokens=200,
     )
@@ -62,9 +54,7 @@ def build_stream_request() -> ModelRequest:
         messages=[
             ChatMessage(
                 role="user",
-                content=(
-                    "Explain async streams."
-                ),
+                content=("Explain async streams."),
             )
         ],
         required_capabilities=frozenset(
@@ -110,40 +100,26 @@ def test_adapter_maps_qwen_result_and_usage() -> None:
         request: httpx.Request,
     ) -> httpx.Response:
         assert request.method == "POST"
-        assert str(request.url) == (
-            "https://qwen.test/v1"
-            "/chat/completions"
-        )
-        assert (
-            request.headers["authorization"]
-            == "Bearer test-key"
-        )
+        assert str(request.url) == ("https://qwen.test/v1/chat/completions")
+        assert request.headers["authorization"] == "Bearer test-key"
 
-        payload = json.loads(
-            request.read()
-        )
+        payload = json.loads(request.read())
 
         assert payload["stream"] is False
-        assert payload["model"] == (
-            "qwen3.8-max"
-        )
-        assert payload["max_tokens"] == 200
+        assert payload["model"] == ("qwen3.8-max")
+        assert payload["max_completion_tokens"] == 200
+        assert "max_tokens" not in payload
 
         return httpx.Response(
             200,
             json=response_body(
-                content=(
-                    "A structured "
-                    "learning task."
-                ),
+                content=("A structured learning task."),
             ),
             request=request,
         )
 
     async def run() -> Any:
-        transport = httpx.MockTransport(
-            handler
-        )
+        transport = httpx.MockTransport(handler)
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -151,33 +127,22 @@ def test_adapter_maps_qwen_result_and_usage() -> None:
             adapter = QwenAdapter(
                 client=client,
                 api_key="test-key",
-                base_url=(
-                    "https://qwen.test/v1"
-                ),
+                base_url=("https://qwen.test/v1"),
             )
 
-            return (
-                await adapter.provider.complete(
-                    build_request()
-                )
-            )
+            return await adapter.provider.complete(build_request())
 
     result = asyncio.run(run())
 
     assert result.provider == "qwen"
     assert result.model == "qwen3.8-max"
     assert result.message.role == "assistant"
-    assert result.message.content == (
-        "A structured learning task."
-    )
+    assert result.message.content == ("A structured learning task.")
     assert result.finish_reason == "stop"
     assert result.usage is not None
     assert result.usage.input_tokens == 21
     assert result.usage.output_tokens == 13
-    assert (
-        result.usage.cached_input_tokens
-        == 4
-    )
+    assert result.usage.cached_input_tokens == 4
     assert result.usage.total_tokens == 34
 
 
@@ -202,16 +167,12 @@ def test_adapter_sends_json_schema_and_parses_output() -> None:
     def handler(
         request: httpx.Request,
     ) -> httpx.Response:
-        payload = json.loads(
-            request.read()
-        )
+        payload = json.loads(request.read())
 
         assert payload["response_format"] == {
             "type": "json_schema",
             "json_schema": {
-                "name": (
-                    "structured_response"
-                ),
+                "name": ("structured_response"),
                 "schema": schema,
                 "strict": True,
             },
@@ -220,18 +181,13 @@ def test_adapter_sends_json_schema_and_parses_output() -> None:
         return httpx.Response(
             200,
             json=response_body(
-                content=(
-                    '{"title":"Async retry",'
-                    '"estimated_minutes":60}'
-                ),
+                content=('{"title":"Async retry","estimated_minutes":60}'),
             ),
             request=request,
         )
 
     async def run() -> Any:
-        transport = httpx.MockTransport(
-            handler
-        )
+        transport = httpx.MockTransport(handler)
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -239,16 +195,12 @@ def test_adapter_sends_json_schema_and_parses_output() -> None:
             adapter = QwenAdapter(
                 client=client,
                 api_key="test-key",
-                base_url=(
-                    "https://qwen.test/v1"
-                ),
+                base_url=("https://qwen.test/v1"),
             )
 
-            return (
-                await adapter.provider.complete(
-                    build_request(
-                        response_schema=schema,
-                    )
+            return await adapter.provider.complete(
+                build_request(
+                    response_schema=schema,
                 )
             )
 
@@ -273,9 +225,7 @@ def test_invalid_structured_response_is_hidden_by_provider_boundary() -> None:
         )
 
     async def run() -> Any:
-        transport = httpx.MockTransport(
-            handler
-        )
+        transport = httpx.MockTransport(handler)
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -283,21 +233,15 @@ def test_invalid_structured_response_is_hidden_by_provider_boundary() -> None:
             adapter = QwenAdapter(
                 client=client,
                 api_key="test-key",
-                base_url=(
-                    "https://qwen.test/v1"
-                ),
+                base_url=("https://qwen.test/v1"),
             )
 
-            with pytest.raises(
-                ProviderExecutionError
-            ) as exc_info:
-                await (
-                    adapter.provider.complete(
-                        build_request(
-                            response_schema={
-                                "type": "object",
-                            }
-                        )
+            with pytest.raises(ProviderExecutionError) as exc_info:
+                await adapter.provider.complete(
+                    build_request(
+                        response_schema={
+                            "type": "object",
+                        }
                     )
                 )
 
@@ -310,43 +254,42 @@ def test_invalid_structured_response_is_hidden_by_provider_boundary() -> None:
 
 
 def test_adapter_maps_qwen_stream_events_and_usage() -> None:
-    stream_body = "\n\n".join(
-        [
-            (
-                'data: {"choices":[{'
-                '"delta":{"role":"assistant",'
-                '"content":"Hello"},'
-                '"finish_reason":null}]}'
-            ),
-            (
-                'data: {"choices":[{'
-                '"delta":{"content":" world"},'
-                '"finish_reason":null}]}'
-            ),
-            (
-                'data: {"choices":[{'
-                '"delta":{},'
-                '"finish_reason":"stop"}]}'
-            ),
-            (
-                'data: {"choices":[],'
-                '"usage":{"prompt_tokens":12,'
-                '"completion_tokens":7,'
-                '"prompt_tokens_details":'
-                '{"cached_tokens":2}}}'
-            ),
-            "data: [DONE]",
-        ]
-    ) + "\n\n"
+    stream_body = (
+        "\n\n".join(
+            [
+                (
+                    'data: {"choices":[{'
+                    '"delta":{"role":"assistant",'
+                    '"content":"Hello"},'
+                    '"finish_reason":null}]}'
+                ),
+                (
+                    'data: {"choices":[{'
+                    '"delta":{"content":" world"},'
+                    '"finish_reason":null}]}'
+                ),
+                ('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}'),
+                (
+                    'data: {"choices":[],'
+                    '"usage":{"prompt_tokens":12,'
+                    '"completion_tokens":7,'
+                    '"prompt_tokens_details":'
+                    '{"cached_tokens":2}}}'
+                ),
+                "data: [DONE]",
+            ]
+        )
+        + "\n\n"
+    )
 
     def handler(
         request: httpx.Request,
     ) -> httpx.Response:
-        payload = json.loads(
-            request.read()
-        )
+        payload = json.loads(request.read())
 
         assert payload["stream"] is True
+        assert payload["max_completion_tokens"] == 200
+        assert "max_tokens" not in payload
         assert payload["stream_options"] == {
             "include_usage": True,
         }
@@ -354,18 +297,12 @@ def test_adapter_maps_qwen_stream_events_and_usage() -> None:
         return httpx.Response(
             200,
             text=stream_body,
-            headers={
-                "content-type": (
-                    "text/event-stream"
-                )
-            },
+            headers={"content-type": ("text/event-stream")},
             request=request,
         )
 
     async def run() -> list[Any]:
-        transport = httpx.MockTransport(
-            handler
-        )
+        transport = httpx.MockTransport(handler)
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -373,17 +310,11 @@ def test_adapter_maps_qwen_stream_events_and_usage() -> None:
             adapter = QwenAdapter(
                 client=client,
                 api_key="test-key",
-                base_url=(
-                    "https://qwen.test/v1"
-                ),
+                base_url=("https://qwen.test/v1"),
             )
 
             return [
-                event
-                async for event
-                in adapter.provider.stream(
-                    build_stream_request()
-                )
+                event async for event in adapter.provider.stream(build_stream_request())
             ]
 
     events = asyncio.run(run())
@@ -396,9 +327,7 @@ def test_adapter_maps_qwen_stream_events_and_usage() -> None:
             output_tokens=7,
             cached_input_tokens=2,
         ),
-        DoneEvent(
-            finish_reason="stop"
-        ),
+        DoneEvent(finish_reason="stop"),
     ]
 
 
@@ -408,21 +337,13 @@ def test_invalid_qwen_stream_event_is_hidden_by_provider_boundary() -> None:
     ) -> httpx.Response:
         return httpx.Response(
             200,
-            text=(
-                "data: {broken-json}\n\n"
-            ),
-            headers={
-                "content-type": (
-                    "text/event-stream"
-                )
-            },
+            text=("data: {broken-json}\n\n"),
+            headers={"content-type": ("text/event-stream")},
             request=request,
         )
 
     async def run() -> Any:
-        transport = httpx.MockTransport(
-            handler
-        )
+        transport = httpx.MockTransport(handler)
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -430,23 +351,12 @@ def test_invalid_qwen_stream_event_is_hidden_by_provider_boundary() -> None:
             adapter = QwenAdapter(
                 client=client,
                 api_key="test-key",
-                base_url=(
-                    "https://qwen.test/v1"
-                ),
+                base_url=("https://qwen.test/v1"),
             )
 
-            with pytest.raises(
-                ProviderExecutionError
-            ) as exc_info:
-                async for (
-                    _event
-                ) in adapter.provider.stream(
-                    build_stream_request()
-                ):
-                    raise AssertionError(
-                        "invalid stream must "
-                        "not emit events"
-                    )
+            with pytest.raises(ProviderExecutionError) as exc_info:
+                async for _event in adapter.provider.stream(build_stream_request()):
+                    raise AssertionError("invalid stream must not emit events")
 
             return exc_info.value
 
@@ -457,9 +367,7 @@ def test_invalid_qwen_stream_event_is_hidden_by_provider_boundary() -> None:
 
 
 def test_stream_cancellation_closes_upstream_response() -> None:
-    class BlockingStream(
-        httpx.AsyncByteStream
-    ):
+    class BlockingStream(httpx.AsyncByteStream):
         def __init__(self) -> None:
             self.waiting = asyncio.Event()
             self.closed = False
@@ -487,19 +395,13 @@ def test_stream_cancellation_closes_upstream_response() -> None:
     ) -> httpx.Response:
         return httpx.Response(
             200,
-            headers={
-                "content-type": (
-                    "text/event-stream"
-                )
-            },
+            headers={"content-type": ("text/event-stream")},
             stream=upstream_stream,
             request=request,
         )
 
     async def run() -> bool:
-        transport = httpx.MockTransport(
-            handler
-        )
+        transport = httpx.MockTransport(handler)
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -507,30 +409,20 @@ def test_stream_cancellation_closes_upstream_response() -> None:
             adapter = QwenAdapter(
                 client=client,
                 api_key="test-key",
-                base_url=(
-                    "https://qwen.test/v1"
-                ),
+                base_url=("https://qwen.test/v1"),
             )
 
             async def consume() -> None:
-                async for (
-                    _event
-                ) in adapter.provider.stream(
-                    build_stream_request()
-                ):
+                async for _event in adapter.provider.stream(build_stream_request()):
                     continue
 
-            task = asyncio.create_task(
-                consume()
-            )
+            task = asyncio.create_task(consume())
 
             await upstream_stream.waiting.wait()
 
             task.cancel()
 
-            with pytest.raises(
-                asyncio.CancelledError
-            ):
+            with pytest.raises(asyncio.CancelledError):
                 await task
 
         return upstream_stream.closed

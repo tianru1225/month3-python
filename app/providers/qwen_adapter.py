@@ -97,7 +97,7 @@ class QwenAdapter:
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.max_output_tokens is not None and request.response_schema is None:
-            payload["max_tokens"] = request.max_output_tokens
+            payload["max_completion_tokens"] = request.max_output_tokens
         if request.response_schema is not None:
             payload["response_format"] = {
                 "type": "json_schema",
