@@ -17,6 +17,6 @@ The token uses HS256 and contains sub, iat and exp. The subject is a positive us
 
 This stage has no refresh token, roles, revocation list or OAuth. The current-user dependency reloads the user for every request and rejects a user that is no longer ACTIVE.
 
-Unknown login identifiers and wrong passwords both return 401 INVALID_CREDENTIALS. DISABLED and LOCKED users return 403 USER_NOT_ACTIVE after a correct password.
+Unknown usernames and wrong passwords both return 401 INVALID_CREDENTIALS. DISABLED and LOCKED users return 403 USER_NOT_ACTIVE after a correct password.
 
 Logs may contain method, path, status, request ID and elapsed time. They must not contain passwords, hashes, JWTs, Authorization headers, API keys or secrets. Rotating JWT_SECRET_KEY invalidates existing access tokens.
