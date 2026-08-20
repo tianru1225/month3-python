@@ -70,6 +70,7 @@ def test_complete_retries_rate_limit_using_retry_after(monkeypatch) -> None:
         if attempts == 1:
             raise ProviderRateLimitError(
                 provider="fake",
+                retryable=True,
                 retry_after_seconds=2.0,
             )
         return build_result()
@@ -251,3 +252,43 @@ def test_execution_layer_applies_backpressure() -> None:
         assert limiter.snapshot.waiting == 0
 
     asyncio.run(run())
+
+
+def test_complete_does_not_retry_non_retryable_rate_limit(monkeypatch) -> None:
+    attempts = 0
+    slept: list[float] = []
+
+    async def complete(request: ModelRequest) -> ModelResult:
+        nonlocal attempts
+        attempts += 1
+        raise ProviderRateLimitError(
+            provider="fake",
+            retryable=False,
+            retry_after_seconds=2.0,
+        )
+
+    async def fake_sleep(delay_seconds: float) -> None:
+        slept.append(delay_seconds)
+
+    monkeypatch.setattr(settings, "llm_retry_max_attempts", 3)
+    monkeypatch.setattr(
+        "app.services.provider_execution._sleep",
+        fake_sleep,
+    )
+
+    with pytest.raises(ProviderRateLimitError) as exc_info:
+        asyncio.run(
+            complete_with_provider(
+                build_provider(complete),
+                build_request(),
+                limiter=ProviderConcurrencyLimiter(
+                    max_active=1,
+                    max_waiting=0,
+                ),
+            )
+        )
+
+    assert exc_info.value.retryable is False
+    assert exc_info.value.retry_after_seconds is None
+    assert attempts == 1
+    assert slept == []

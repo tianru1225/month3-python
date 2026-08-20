@@ -55,19 +55,20 @@ class ProviderAuthenticationError(ProviderError):
 class ProviderRateLimitError(ProviderError):
     code = "PROVIDER_RATE_LIMITED"
     public_message = "Model provider rate limit exceeded"
-    retryable = True
 
     def __init__(
         self,
         *,
         provider: str,
+        retryable: bool,
         retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(
             "model provider rate limit exceeded",
             provider=provider,
-            retry_after_seconds=retry_after_seconds,
+            retry_after_seconds=retry_after_seconds if retryable else None,
         )
+        self.retryable = retryable
 
 
 class ProviderTimeoutError(ProviderError):

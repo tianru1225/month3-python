@@ -31,6 +31,30 @@ from app.schemas.llm_stream import (
     UsageEvent,
 )
 
+_QWEN_RETRYABLE_429_CODES = frozenset(
+    {
+        "Throttling",
+        "Throttling.RateQuota",
+        "LimitRequests",
+        "limit_requests",
+        "ResourceExhausted",
+        "Too many requests",
+        "Throttling.BurstRate",
+        "limit_burst_rate",
+        "Throttling.Concurrency",
+    }
+)
+
+_QWEN_NON_RETRYABLE_429_CODES = frozenset(
+    {
+        "Throttling.AllocationQuota",
+        "insufficient_quota",
+        "CommodityNotPurchased",
+        "PrepaidBillOverdue",
+        "PostpaidBillOverdue",
+    }
+)
+
 
 class QwenAdapter:
     def __init__(
@@ -245,8 +269,11 @@ class QwenAdapter:
             if status_code in {401, 403}:
                 raise ProviderAuthenticationError(provider="qwen") from exc
             if status_code == 429:
+                code = cls._qwen_error_code(response)
+                retryable = cls._classify_qwen_429(code)
                 raise ProviderRateLimitError(
                     provider="qwen",
+                    retryable=retryable,
                     retry_after_seconds=cls._parse_retry_after(
                         response.headers.get("Retry-After")
                     ),
@@ -314,3 +341,26 @@ class QwenAdapter:
             output_tokens=completion_tokens,
             cached_input_tokens=cached_tokens,
         )
+
+    @staticmethod
+    def _qwen_error_code(response: httpx.Response) -> str | None:
+        try:
+            body = response.json()
+        except ValueError:
+            return None
+        if not isinstance(body, dict):
+            return None
+
+        error = body.get("error")
+        if not isinstance(error, dict):
+            return None
+        code = error.get("code")
+        if not isinstance(code, str):
+            return None
+
+        code = code.strip()
+        return code or None
+
+    @classmethod
+    def _classify_qwen_429(cls, code: str | None) -> bool:
+        return code in _QWEN_RETRYABLE_429_CODES
