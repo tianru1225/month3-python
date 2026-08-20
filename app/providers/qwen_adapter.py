@@ -274,8 +274,10 @@ class QwenAdapter:
                 raise ProviderRateLimitError(
                     provider="qwen",
                     retryable=retryable,
-                    retry_after_seconds=cls._parse_retry_after(
-                        response.headers.get("Retry-After")
+                    retry_after_seconds=(
+                        cls._parse_retry_after(response.headers.get("Retry-After"))
+                        if retryable
+                        else None
                     ),
                 ) from exc
             if status_code >= 500:
