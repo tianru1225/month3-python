@@ -48,6 +48,7 @@ def client(db_session):
 
 @pytest.fixture(autouse=True)
 def configured_auth(monkeypatch):
+    monkeypatch.setattr(settings, "api_key", "day69-new-key")
     monkeypatch.setattr(
         settings, "jwt_secret_key", "day119-test-jwt-secret-32-chars-long"
     )
