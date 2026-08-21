@@ -1,19 +1,34 @@
 # Month3 前端预览
 
-这是当前 FastAPI 后端的 React + TypeScript 前端预览工作台。
+这是当前 FastAPI 后端的 React + TypeScript 前端预览。
 
-## 当前范围
+## 当前功能
 
-- FastAPI OpenAPI 是前端 API 契约的唯一来源。
-- 浏览器请求统一使用同源 `/api` 前缀。
-- API Key、JWT、密码、数据库地址和 Provider 密钥不得写入 `VITE_*` 变量。
-- Frontend-P1 只实现服务总览；流式对话和登录状态分别在 P2、P3 实现。
+- 服务健康、PostgreSQL 和 OpenAPI 状态检查；
+- 用户名注册；
+- 用户名密码登录；
+- 当前标签页恢复 JWT 登录状态；
+- 退出登录；
+- JWT 用户聊天流式输出；
+- 取消生成和失败重试。
 
-## 常用命令
+## API 边界
 
-```bash
+浏览器统一请求同源 /api。开发服务器把它代理到后端。
+
+用户聊天只调用：
+
+- /api/auth/login
+- /api/users
+- /api/users/me
+- /api/v1/user-chat/stream
+
+浏览器不保存应用 API Key，也不接触 DASHSCOPE_API_KEY。access token 只放在当前标签页的 sessionStorage 中，refresh token 和聊天历史持久化尚未实现。
+
+## 运行命令
+
+~~~bash
 npm install
 npm run api:types
 npm run build
 npm run dev
-```
