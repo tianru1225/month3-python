@@ -23,6 +23,7 @@ const accessTokenKey = "month3.access_token";
 type ErrorInfo = {
   code?: string;
   message?: string;
+  retryable?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,7 +39,10 @@ function getErrorInfo(body: unknown): ErrorInfo {
   if (isRecord(detail)) {
     return {
       code: typeof detail.code === "string" ? detail.code : undefined,
-      message: typeof detail.message === "string" ? detail.message : undefined,
+      message:
+        typeof detail.message === "string" ? detail.message : undefined,
+      retryable:
+        typeof detail.retryable === "boolean" ? detail.retryable : undefined,
     };
   }
 
@@ -59,12 +63,26 @@ function getErrorInfo(body: unknown): ErrorInfo {
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code?: string;
+  readonly retryable: boolean;
 
   constructor(status: number, info: ErrorInfo = {}) {
     super(info.message || "请求失败（HTTP " + status + "）");
     this.name = "ApiRequestError";
     this.status = status;
     this.code = info.code;
+    this.retryable = info.retryable ?? (status >= 500 || status === 429);
+  }
+}
+
+export class StreamEventError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(code: string, message: string, retryable: boolean) {
+    super(message);
+    this.name = "StreamEventError";
+    this.code = code;
+    this.retryable = retryable;
   }
 }
 
@@ -162,7 +180,17 @@ export async function* streamUserChat(
 
       for (const line of lines) {
         if (line.trim()) {
-          yield JSON.parse(line) as StreamEvent;
+          const event = JSON.parse(line) as StreamEvent;
+
+          if (event.type === "error") {
+            throw new StreamEventError(
+              event.code,
+              event.message,
+              event.retryable,
+            );
+          }
+
+          yield event;
         }
       }
 
@@ -172,16 +200,19 @@ export async function* streamUserChat(
     }
 
     if (buffer.trim()) {
-      yield JSON.parse(buffer) as StreamEvent;
+      const event = JSON.parse(buffer) as StreamEvent;
+
+      if (event.type === "error") {
+        throw new StreamEventError(
+          event.code,
+          event.message,
+          event.retryable,
+        );
+      }
+
+      yield event;
     }
   } finally {
     reader.releaseLock();
   }
-}
-
-export function isAuthError(error: unknown): boolean {
-  return (
-    error instanceof ApiRequestError &&
-    (error.status === 401 || error.status === 403)
-  );
 }

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     qwen_read_timeout_seconds: float = 240.0
     qwen_write_timeout_seconds: float = 30.0
     qwen_pool_timeout_seconds: float = 10.0
-    qwen_max_output_tokens: int = Field(default=600, ge=1, le=32768)
+    qwen_max_output_tokens: int = Field(default=6000, ge=1, le=32768)
 
     jwt_secret_key: SecretStr = SecretStr("")
     jwt_access_token_expire_minutes: int = Field(default=30, ge=1, le=1440)

@@ -103,11 +103,19 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .message-user .message-content p { color: #fff; border-color: var(--green); background: var(--green); text-align: left; }
 .message-failed .message-content p { color: var(--danger); border-color: #edc8c4; background: #fff6f5; }
 .streaming-label { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+
+.chat-error { margin: 0 24px 16px; padding: 13px 14px; border: 1px solid #e4b8b3; border-radius: 7px; color: #7d302d; background: #fff6f5; }
+.chat-error-heading { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.chat-error-heading span { margin-left: auto; color: #a45b56; font-family: monospace; font-size: 11px; }
+.chat-error p { margin: 7px 0 0; font-size: 13px; line-height: 1.6; }
+.chat-error code { display: inline-block; margin-top: 7px; font-family: monospace; font-size: 11px; }
+.chat-error small { display: block; margin-top: 7px; color: #99635f; font-size: 11px; }
+
 .composer { padding: 18px 24px 22px; border-top: 1px solid var(--line); }
 .composer textarea { min-height: 88px; padding: 12px; resize: vertical; line-height: 1.6; }
 .composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--muted); font-size: 11px; }
 .cancel-button { color: var(--danger); border-color: #e2b5b0; }
-.retry-button { margin: 0 24px; color: var(--blue); border-color: #b8cce2; }
+.retry-button { margin: 0 24px 16px; color: var(--blue); border-color: #b8cce2; }
 
 .contract-band { margin-top: 18px; padding: 26px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .contract-band h2 { font-size: 23px; }
@@ -145,6 +153,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .panel-heading { padding: 18px; align-items: flex-start; flex-direction: column; }
   .message-list { padding: 18px; }
   .message { max-width: 94%; }
+  .chat-error { margin-inline: 18px; }
+  .chat-error-heading { align-items: flex-start; }
   .composer { padding: 16px 18px 18px; }
   .composer-foot { align-items: flex-end; flex-direction: column; }
   .composer-foot .primary-button, .composer-foot .cancel-button { width: 100%; }

@@ -22,12 +22,11 @@ import {
   clearStoredAccessToken,
   getJson,
   getStoredAccessToken,
-  isAuthError,
   postJson,
   storeAccessToken,
+  StreamEventError,
   streamUserChat,
   type ChatMessage,
-  type StreamEvent,
   type TokenResponse,
   type User,
 } from "./api/client";
@@ -47,6 +46,15 @@ type ViewMessage = ChatMessage & {
   id: string;
   pending?: boolean;
   failed?: boolean;
+};
+
+type ErrorNotice = {
+  title: string;
+  detail: string;
+  code?: string;
+  status?: number;
+  retryable: boolean;
+  requiresLogin: boolean;
 };
 
 const checkingState: OverviewState = {
@@ -72,17 +80,120 @@ function hasNestedValue(
   );
 }
 
-function errorDetail(error: unknown): string {
-  if (error instanceof ApiRequestError) {
-    if (error.code === "AUTH_INVALID" || error.code === "AUTH_REQUIRED") {
-      return "登录状态已失效，请重新登录";
-    }
-    if (error.code === "USER_NOT_ACTIVE") {
-      return "用户当前不可用";
-    }
-    return error.message;
+function providerNotice(
+  status: number | undefined,
+  code: string | undefined,
+  retryable: boolean,
+): ErrorNotice {
+  if (status === 429 || code === "LLM_RATE_LIMITED" || code === "LLM_CONCURRENCY_LIMIT") {
+    return {
+      title: "请求过于频繁",
+      detail: "服务容量暂时不足，请稍后重新发送消息。",
+      code,
+      status,
+      retryable,
+      requiresLogin: false,
+    };
   }
-  return error instanceof Error ? error.message : "请求失败";
+
+  if (status === 503 || code === "LLM_UPSTREAM_CONNECTION_ERROR") {
+    return {
+      title: "模型服务暂时不可用",
+      detail: "后端暂时无法连接模型服务，请稍后再试。",
+      code,
+      status,
+      retryable,
+      requiresLogin: false,
+    };
+  }
+
+  if (status === 504 || code === "LLM_REQUEST_TIMEOUT" || code === "LLM_GENERATION_TIMEOUT") {
+    return {
+      title: "模型响应超时",
+      detail: "模型生成时间过长，请稍后重新发送消息。",
+      code,
+      status,
+      retryable,
+      requiresLogin: false,
+    };
+  }
+
+  return {
+    title: "模型服务返回异常",
+    detail: "模型请求没有正常完成，请稍后再试。",
+    code,
+    status,
+    retryable,
+    requiresLogin: false,
+  };
+}
+
+function toErrorNotice(error: unknown): ErrorNotice {
+  if (error instanceof ApiRequestError) {
+    if (error.code === "INVALID_CREDENTIALS") {
+      return {
+        title: "用户名或密码错误",
+        detail: "请检查用户名和密码后重试。",
+        code: error.code,
+        status: error.status,
+        retryable: false,
+        requiresLogin: false,
+      };
+    }
+
+    if (error.status === 401) {
+      return {
+        title: "登录状态已失效",
+        detail: "请重新登录后继续使用。",
+        code: error.code,
+        status: error.status,
+        retryable: false,
+        requiresLogin: true,
+      };
+    }
+
+    if (error.status === 403) {
+      return {
+        title: "当前用户不可用",
+        detail: "当前账户没有继续访问用户工作区的权限。",
+        code: error.code,
+        status: error.status,
+        retryable: false,
+        requiresLogin: true,
+      };
+    }
+
+    if (error.status === 429 || error.status >= 500) {
+      return providerNotice(error.status, error.code, error.retryable);
+    }
+
+    return {
+      title: "操作失败",
+      detail: error.message,
+      code: error.code,
+      status: error.status,
+      retryable: error.retryable,
+      requiresLogin: false,
+    };
+  }
+
+  if (error instanceof StreamEventError) {
+    return providerNotice(undefined, error.code, error.retryable);
+  }
+
+  return {
+    title: "请求失败",
+    detail: error instanceof Error ? error.message : "页面无法完成这次请求。",
+    retryable: false,
+    requiresLogin: false,
+  };
+}
+
+function errorDetail(error: unknown): string {
+  const notice = toErrorNotice(error);
+  return notice.status
+    ? notice.title + "（HTTP " + notice.status + "）"
+    : notice.title;
 }
 
 function newId(): string {
@@ -138,6 +249,7 @@ export default function App() {
   const [messages, setMessages] = useState<ViewMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [retryText, setRetryText] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<ErrorNotice | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<ViewMessage[]>([]);
 
@@ -178,9 +290,13 @@ export default function App() {
     setToken(storedToken);
     void getJson<User>("/users/me", storedToken)
       .then(setUser)
-      .catch(() => {
+      .catch((error) => {
         clearStoredAccessToken();
         setToken(null);
+        const notice = toErrorNotice(error);
+        if (notice.requiresLogin) {
+          setAuthMessage(notice.title + "，请重新登录");
+        }
       })
       .finally(() => setAuthReady(true));
   }, [refresh]);
@@ -197,6 +313,7 @@ export default function App() {
     setUser(null);
     setMessages([]);
     setRetryText(null);
+    setChatError(null);
   }, []);
 
   const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
@@ -219,8 +336,10 @@ export default function App() {
       setToken(login.access_token);
       setUser(profile);
       setPassword("");
+      setAuthMessage("");
     } catch (error) {
-      setAuthMessage(errorDetail(error));
+      const notice = toErrorNotice(error);
+      setAuthMessage(notice.title + "：" + notice.detail);
     } finally {
       setAuthBusy(false);
     }
@@ -248,6 +367,7 @@ export default function App() {
       setMessages((current) => [...current, userMessage, assistantMessage]);
       setStreaming(true);
       setRetryText(null);
+      setChatError(null);
 
       const controller = new AbortController();
       controllerRef.current = controller;
@@ -274,31 +394,42 @@ export default function App() {
                   : message,
               ),
             );
-          } else if (event.type === "error") {
-            throw new Error(event.message);
           }
         }
       } catch (error) {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantId
-              ? {
-                  ...message,
-                  content: controller.signal.aborted
-                    ? "本次生成已取消"
-                    : errorDetail(error),
-                  pending: false,
-                  failed: !controller.signal.aborted,
-                }
-              : message,
-          ),
-        );
-
-        if (!controller.signal.aborted) {
+        if (controller.signal.aborted) {
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    content: "本次生成已取消",
+                    pending: false,
+                  }
+                : message,
+            ),
+          );
+        } else {
+          const notice = toErrorNotice(error);
+          setChatError(notice);
           setRetryText(prompt);
-          if (isAuthError(error)) {
+
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    content: notice.detail,
+                    pending: false,
+                    failed: true,
+                  }
+                : message,
+            ),
+          );
+
+          if (notice.requiresLogin) {
             logout();
-            setAuthMessage("登录状态已失效，请重新登录");
+            setAuthMessage(notice.title + "，请重新登录");
           }
         }
       } finally {
@@ -314,6 +445,7 @@ export default function App() {
     if (!prompt || streaming || !token) {
       return;
     }
+
     void runStream(prompt, requestMessages(messagesRef.current));
     setDraft("");
   };
@@ -326,6 +458,7 @@ export default function App() {
     const base = messagesRef.current.slice(0, -2);
     setMessages(base);
     setRetryText(null);
+    setChatError(null);
     void runStream(retryText, requestMessages(base));
   };
 
@@ -351,7 +484,7 @@ export default function App() {
         </nav>
         <div className="sidebar-foot">
           <ShieldCheck size={17} aria-hidden="true" />
-          <span>Frontend-P2</span>
+          <span>Frontend-P3</span>
         </div>
       </aside>
 
@@ -410,6 +543,7 @@ export default function App() {
             messages={messages}
             streaming={streaming}
             retryText={retryText}
+            chatError={chatError}
             onDraftChange={setDraft}
             onSend={sendMessage}
             onCancel={() => controllerRef.current?.abort()}
@@ -544,6 +678,7 @@ function ChatPanel({
   messages,
   streaming,
   retryText,
+  chatError,
   onDraftChange,
   onSend,
   onCancel,
@@ -553,6 +688,7 @@ function ChatPanel({
   messages: ViewMessage[];
   streaming: boolean;
   retryText: string | null;
+  chatError: ErrorNotice | null;
   onDraftChange: (value: string) => void;
   onSend: () => void;
   onCancel: () => void;
@@ -599,11 +735,28 @@ function ChatPanel({
           </article>
         ))}
       </div>
+
+      {chatError && (
+        <div className="chat-error" role="alert">
+          <div className="chat-error-heading">
+            <CircleAlert size={17} />
+            <strong>{chatError.title}</strong>
+            {chatError.status && <span>HTTP {chatError.status}</span>}
+          </div>
+          <p>{chatError.detail}</p>
+          {chatError.code && <code>{chatError.code}</code>}
+          {chatError.retryable && (
+            <small>这是暂时性错误，可以稍后重新发送新的消息。</small>
+          )}
+        </div>
+      )}
+
       {retryText && !streaming && (
         <button className="retry-button" type="button" onClick={onRetry}>
           重试上一条
         </button>
       )}
+
       <div className="composer">
         <textarea
           value={draft}
