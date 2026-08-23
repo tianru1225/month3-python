@@ -1,5 +1,6 @@
-from app.models.user import User
 from app.models.conversation import Conversation
+from app.models.learning_project import LearningProject
 from app.models.message import Message
+from app.models.user import User
 
-__all__ = ["User","Conversation","Message"]
+__all__ = ["User", "Conversation", "Message", "LearningProject"]
