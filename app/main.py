@@ -17,6 +17,7 @@ from app.routers.debug import router as debug_router
 from app.routers.items import router as items_router
 from app.routers.chat import router as chat_router
 from app.routers.auth import router as auth_router
+from app.routers.projects import router as projects_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +69,7 @@ def read_root():
 
 app.include_router(health_router)
 app.include_router(users_router)
+app.include_router(projects_router)
 app.include_router(tasks_router)
 app.include_router(rq_tasks_router)
 app.include_router(items_router)
