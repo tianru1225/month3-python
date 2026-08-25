@@ -7,6 +7,8 @@ services:
     container_name: month3-api
     ports:
       - "127.0.0.1:8001:8000"
+    volumes:
+      - material_data:/app/data/materials
     env_file:
       - .env
     environment:
@@ -73,3 +75,4 @@ services:
 
 volumes:
   postgres_data:
+  material_data:

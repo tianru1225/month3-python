@@ -3,21 +3,22 @@ import time
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi import _rate_limit_exceeded_handler
 
 from app.config import settings
 from app.core.limiter import limiter
-from app.routers.health import router as health_router
-from app.routers.users import router as users_router
-from app.routers.tasks import router as tasks_router
-from app.routers.rq_tasks import router as rq_tasks_router
-from app.routers.debug import router as debug_router
-from app.routers.items import router as items_router
-from app.routers.chat import router as chat_router
 from app.routers.auth import router as auth_router
+from app.routers.chat import router as chat_router
+from app.routers.debug import router as debug_router
+from app.routers.health import router as health_router
+from app.routers.items import router as items_router
+from app.routers.materials import router as materials_router
 from app.routers.projects import router as projects_router
+from app.routers.rq_tasks import router as rq_tasks_router
+from app.routers.tasks import router as tasks_router
+from app.routers.users import router as users_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,7 +34,10 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type] # slowapi handler 签名比 Starlette 要求更窄，运行时安全
+app.add_exception_handler(
+    RateLimitExceeded,
+    _rate_limit_exceeded_handler,  # type: ignore[arg-type]
+)
 app.add_middleware(SlowAPIMiddleware)
 
 
@@ -70,6 +74,7 @@ def read_root():
 app.include_router(health_router)
 app.include_router(users_router)
 app.include_router(projects_router)
+app.include_router(materials_router)
 app.include_router(tasks_router)
 app.include_router(rq_tasks_router)
 app.include_router(items_router)
