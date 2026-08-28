@@ -106,3 +106,20 @@ def mark_version_failed(
     version.processed_at = utc_now()
     db.commit()
     db.refresh(version)
+
+def list_ready_versions_for_user(
+    db: Session,
+    *,
+    user_id: int
+) -> list[MaterialVersion]:
+    return list(
+        db.scalars(
+            select(MaterialVersion)
+            .join(Material, Material.id == MaterialVersion.material_id)
+            .where(
+                Material.user_id == user_id,
+                MaterialVersion.parse_status==ParseStatus.READY.value,
+            )
+            .order_by(MaterialVersion.id)
+        )
+    )
