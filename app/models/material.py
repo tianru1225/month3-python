@@ -18,8 +18,6 @@ from app.db.base import Base
 
 class MaterialFormat(str, Enum):
     MARKDOWN = "markdown"
-    TXT = "txt"
-    TEXT_PDF = "text_pdf"
 
 
 class ParseStatus(str, Enum):
@@ -76,7 +74,7 @@ class MaterialVersion(Base):
             name="ck_material_versions_size_bytes",
         ),
         CheckConstraint(
-            "normalized_format IN ('markdown','txt','text_pdf')",
+            "normalized_format = 'markdown'",
             name="ck_material_versions_format",
         ),
         CheckConstraint(

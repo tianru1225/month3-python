@@ -19,3 +19,20 @@ class MaterialUploadResponse(BaseModel):
     content_hash: str
     parse_status: ParseStatus
     uploaded_at: datetime
+
+
+class MaterialParseResponse(BaseModel):
+    material_id: int
+    version_id: int
+    version_number: int
+    original_filename: str
+    normalized_format: MaterialFormat
+    parse_status: ParseStatus
+    parser_name: str | None
+    parser_version: str | None
+    content_summary: str | None
+    parsed_content_location: str | None
+    source_metadata: dict | None
+    parse_error_code: str | None
+    parse_error_message: str | None
+    processed_at: datetime | None

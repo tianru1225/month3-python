@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 from app.deps.auth import get_current_user
 from app.deps.db import get_db
 from app.models.user import User
-from app.schemas.material import MaterialUploadResponse
+from app.schemas.material import MaterialUploadResponse, MaterialParseResponse
 from app.services.material_service import (
     MATERIAL_MAX_UPLOAD_BYTES,
     upload_material_or_raise,
+    parse_material_version_or_raise,
 )
 
 router = APIRouter(prefix="/materials", tags=["materials"])
@@ -40,4 +41,24 @@ async def upload_material(
         filename=file.filename or "",
         content_type=file.content_type or "",
         content=content,
+    )
+
+
+@router.post(
+    "/{material_id}/versions/{version_id}/parse",
+    response_model=MaterialParseResponse,
+    status_code=status.HTTP_200_OK,
+    summary="解析Markdown资料",
+)
+def parse_material(
+    material_id: int,
+    version_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MaterialParseResponse:
+    return parse_material_version_or_raise(
+        db,
+        user_id=current_user.id,
+        material_id=material_id,
+        version_id=version_id,
     )

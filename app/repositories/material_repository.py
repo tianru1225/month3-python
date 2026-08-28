@@ -1,6 +1,7 @@
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.material import Material, MaterialVersion, ParseStatus
+from app.models.material import Material, MaterialVersion, ParseStatus, utc_now
 
 
 def create_material_upload(
@@ -16,11 +17,7 @@ def create_material_upload(
     content_hash: str,
     storage_object_key: str,
 ) -> tuple[Material, MaterialVersion]:
-    material = Material(
-        user_id=user_id,
-        name=name,
-        description=description,
-    )
+    material = Material(user_id=user_id, name=name, description=description)
     db.add(material)
     db.flush()
 
@@ -40,3 +37,72 @@ def create_material_upload(
     db.refresh(material)
     db.refresh(version)
     return material, version
+
+
+def get_material_version_for_user(
+    db: Session,
+    *,
+    material_id: int,
+    version_id: int,
+    user_id: int,
+) -> MaterialVersion | None:
+    return db.scalar(
+        select(MaterialVersion)
+        .join(Material, Material.id == MaterialVersion.material_id)
+        .where(
+            MaterialVersion.id == version_id,
+            MaterialVersion.material_id == material_id,
+            Material.user_id == user_id,
+        )
+    )
+
+
+def mark_version_parsing(db: Session, version: MaterialVersion) -> None:
+    version.parse_status = ParseStatus.PARSING.value
+    db.commit()
+    db.refresh(version)
+
+
+def mark_version_ready(
+    db: Session,
+    version: MaterialVersion,
+    *,
+    parser_name: str,
+    parser_version: str,
+    content_summary: str,
+    parsed_content_location: str,
+    source_metadata: dict,
+) -> None:
+    version.parse_status = ParseStatus.READY.value
+    version.parser_name = parser_name
+    version.parser_version = parser_version
+    version.content_summary = content_summary
+    version.parsed_content_location = parsed_content_location
+    version.source_metadata = source_metadata
+    version.parse_error_code = None
+    version.parse_error_message = None
+    version.processed_at = utc_now()
+    db.commit()
+    db.refresh(version)
+
+
+def mark_version_failed(
+    db: Session,
+    version: MaterialVersion,
+    *,
+    parser_name: str,
+    parser_version: str,
+    error_code: str,
+    error_message: str,
+) -> None:
+    version.parse_status = ParseStatus.FAILED.value
+    version.parser_name = parser_name
+    version.parser_version = parser_version
+    version.content_summary = None
+    version.parsed_content_location = None
+    version.source_metadata = None
+    version.parse_error_code = error_code
+    version.parse_error_message = error_message
+    version.processed_at = utc_now()
+    db.commit()
+    db.refresh(version)
