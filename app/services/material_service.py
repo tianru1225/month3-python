@@ -5,17 +5,24 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from redis.exceptions import RedisError
+from rq import Queue
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.material_queue import material_queue
 from app.models.material import MaterialFormat, MaterialVersion, ParseStatus
 from app.parsers.markdown_parser import MarkdownParseError, parse_markdown
 from app.repositories.material_repository import create_material_upload
 from app.repositories.material_repository import get_material_version_for_user
 from app.repositories.material_repository import mark_version_failed
 from app.repositories.material_repository import mark_version_parsing
+from app.repositories.material_repository import mark_version_queued
 from app.repositories.material_repository import mark_version_ready
-from app.schemas.material import MaterialParseResponse, MaterialUploadResponse
+from app.repositories.material_repository import restore_parse_queue_state
+from app.schemas.material import MaterialParseJobResponse
+from app.schemas.material import MaterialParseResponse
+from app.schemas.material import MaterialUploadResponse
 
 MATERIAL_STORAGE_DIR = Path("data/materials")
 MATERIAL_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -64,7 +71,7 @@ def _validate_filename(filename: str) -> tuple[str, str]:
         or len(filename) > 255
         or filename in {".", ".."}
         or "/" in filename
-        or chr(92) in filename
+        or "\\" in filename
         or any(ord(character) < 32 or ord(character) == 127 for character in filename)
     ):
         raise _error(
@@ -72,7 +79,6 @@ def _validate_filename(filename: str) -> tuple[str, str]:
             "MATERIAL_FILENAME_INVALID",
             "invalid upload filename",
         )
-
     extension = Path(filename).suffix.lower()
     if extension not in _UPLOAD_RULES:
         raise _error(
@@ -84,14 +90,14 @@ def _validate_filename(filename: str) -> tuple[str, str]:
 
 
 def _validate_content_type(extension: str, content_type: str) -> str:
-    normalized_content_type = content_type.split(";", 1)[0].strip().lower()
-    if normalized_content_type not in _UPLOAD_RULES[extension]:
+    normalized = content_type.split(";", 1)[0].strip().lower()
+    if normalized not in _UPLOAD_RULES[extension]:
         raise _error(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             "MATERIAL_MIME_INVALID",
             "file content type does not match its extension",
         )
-    return normalized_content_type
+    return normalized
 
 
 def upload_material_or_raise(
@@ -108,7 +114,6 @@ def upload_material_or_raise(
     normalized_description = _normalize_description(description)
     original_filename, extension = _validate_filename(filename)
     normalized_content_type = _validate_content_type(extension, content_type)
-
     if not content:
         raise _error(
             status.HTTP_400_BAD_REQUEST,
@@ -150,10 +155,7 @@ def upload_material_or_raise(
         )
     except SQLAlchemyError as exc:
         db.rollback()
-        try:
-            destination.unlink(missing_ok=True)
-        except OSError:
-            pass
+        destination.unlink(missing_ok=True)
         raise _error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             "MATERIAL_DATABASE_ERROR",
@@ -177,32 +179,13 @@ def upload_material_or_raise(
     )
 
 
-def _parse_response(version: MaterialVersion) -> MaterialParseResponse:
-    return MaterialParseResponse(
-        material_id=version.material_id,
-        version_id=version.id,
-        version_number=version.version_number,
-        original_filename=version.original_filename,
-        normalized_format=MaterialFormat(version.normalized_format),
-        parse_status=ParseStatus(version.parse_status),
-        parser_name=version.parser_name,
-        parser_version=version.parser_version,
-        content_summary=version.content_summary,
-        parsed_content_location=version.parsed_content_location,
-        source_metadata=version.source_metadata,
-        parse_error_code=version.parse_error_code,
-        parse_error_message=version.parse_error_message,
-        processed_at=version.processed_at,
-    )
-
-
-def parse_material_version_or_raise(
+def _get_owned_version(
     db: Session,
     *,
     user_id: int,
     material_id: int,
     version_id: int,
-) -> MaterialParseResponse:
+) -> MaterialVersion:
     version = get_material_version_for_user(
         db,
         material_id=material_id,
@@ -215,25 +198,121 @@ def parse_material_version_or_raise(
             "MATERIAL_VERSION_NOT_FOUND",
             "material version not found",
         )
+    return version
 
-    if version.parse_status == ParseStatus.READY.value:
-        return _parse_response(version)
-    if version.parse_status not in {
-        ParseStatus.UPLOADED.value,
-        ParseStatus.FAILED.value,
+
+def _parse_job_response(version: MaterialVersion) -> MaterialParseJobResponse:
+    return MaterialParseJobResponse(
+        material_id=version.material_id,
+        version_id=version.id,
+        job_id=version.parse_job_id,
+        parse_status=ParseStatus(version.parse_status),
+    )
+
+
+def _parse_response(version: MaterialVersion) -> MaterialParseResponse:
+    return MaterialParseResponse(
+        material_id=version.material_id,
+        version_id=version.id,
+        version_number=version.version_number,
+        original_filename=version.original_filename,
+        normalized_format=MaterialFormat(version.normalized_format),
+        parse_status=ParseStatus(version.parse_status),
+        parse_job_id=version.parse_job_id,
+        parser_name=version.parser_name,
+        parser_version=version.parser_version,
+        content_summary=version.content_summary,
+        parsed_content_location=version.parsed_content_location,
+        source_metadata=version.source_metadata,
+        parse_error_code=version.parse_error_code,
+        parse_error_message=version.parse_error_message,
+        processed_at=version.processed_at,
+    )
+
+
+def enqueue_material_parse_or_raise(
+    db: Session,
+    *,
+    user_id: int,
+    material_id: int,
+    version_id: int,
+    queue: Queue = material_queue,
+) -> tuple[MaterialParseJobResponse, bool]:
+    version = _get_owned_version(
+        db,
+        user_id=user_id,
+        material_id=material_id,
+        version_id=version_id,
+    )
+    if version.parse_status in {
+        ParseStatus.QUEUED.value,
+        ParseStatus.PARSING.value,
+        ParseStatus.READY.value,
     }:
-        raise _error(
-            status.HTTP_409_CONFLICT,
-            "MATERIAL_PARSE_NOT_ALLOWED",
-            "material version cannot be parsed in its current state",
-        )
+        return _parse_job_response(version), False
 
+    previous = (
+        version.parse_status,
+        version.parse_job_id,
+        version.parser_name,
+        version.parser_version,
+        version.parse_error_code,
+        version.parse_error_message,
+        version.processed_at,
+    )
+    job_id = uuid4().hex
+    mark_version_queued(db, version, job_id=job_id)
+    try:
+        from app.tasks.material_jobs import parse_material_version_job
+
+        queue.enqueue(
+            parse_material_version_job,
+            version.id,
+            job_id,
+            job_id=job_id,
+        )
+    except RedisError as exc:
+        restore_parse_queue_state(
+            db,
+            version,
+            parse_status=previous[0],
+            parse_job_id=previous[1],
+            parser_name=previous[2],
+            parser_version=previous[3],
+            parse_error_code=previous[4],
+            parse_error_message=previous[5],
+            processed_at=previous[6],
+        )
+        raise _error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "MATERIAL_QUEUE_UNAVAILABLE",
+            "material parse queue is unavailable",
+        ) from exc
+    return _parse_job_response(version), True
+
+
+def get_material_parse_status_or_raise(
+    db: Session,
+    *,
+    user_id: int,
+    material_id: int,
+    version_id: int,
+) -> MaterialParseResponse:
+    version = _get_owned_version(
+        db,
+        user_id=user_id,
+        material_id=material_id,
+        version_id=version_id,
+    )
+    return _parse_response(version)
+
+
+def process_material_version(db: Session, version: MaterialVersion) -> None:
     mark_version_parsing(db, version)
     parsed_path = (
-        MATERIAL_STORAGE_DIR / "parsed" / str(material_id) / f"{version_id}.md"
+        MATERIAL_STORAGE_DIR / "parsed" / str(version.material_id) / f"{version.id}.md"
     )
     sources_path = parsed_path.with_suffix(".sources.json")
-
     try:
         source_path = MATERIAL_STORAGE_DIR / version.storage_object_key
         if not source_path.is_file():
@@ -241,7 +320,6 @@ def parse_material_version_or_raise(
                 "MATERIAL_SOURCE_NOT_FOUND",
                 "material source file not found",
             )
-
         document = parse_markdown(source_path.read_bytes())
         parsed_path.parent.mkdir(parents=True, exist_ok=True)
         parsed_path.write_text(document.text, encoding="utf-8")
@@ -249,7 +327,7 @@ def parse_material_version_or_raise(
             "kind": "markdown",
             "line_count": document.line_count,
             "headings": document.headings,
-            "sources_path": f"parsed/{material_id}/{version_id}.sources.json",
+            "sources_path": (f"parsed/{version.material_id}/{version.id}.sources.json"),
         }
         source_map = {
             "material_version_id": version.id,
@@ -268,7 +346,7 @@ def parse_material_version_or_raise(
             parser_name=_PARSER_NAME,
             parser_version=_PARSER_VERSION,
             content_summary=_content_summary(document.text),
-            parsed_content_location=f"parsed/{material_id}/{version_id}.md",
+            parsed_content_location=(f"parsed/{version.material_id}/{version.id}.md"),
             source_metadata=source_metadata,
         )
     except MarkdownParseError as exc:
@@ -293,10 +371,4 @@ def parse_material_version_or_raise(
             error_code="MATERIAL_PARSE_ERROR",
             error_message="material could not be parsed",
         )
-        raise _error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "MATERIAL_PARSE_ERROR",
-            "material could not be parsed",
-        ) from exc
-
-    return _parse_response(version)
+        raise RuntimeError("material parse worker failed") from exc

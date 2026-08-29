@@ -49,6 +49,7 @@ services:
       command: python -m app.worker
       volumes:
         - ./logs:/app/logs
+        - material_data:/app/data/materials
       env_file:
         - .env
       environment:

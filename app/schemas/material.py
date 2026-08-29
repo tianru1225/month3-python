@@ -21,6 +21,13 @@ class MaterialUploadResponse(BaseModel):
     uploaded_at: datetime
 
 
+class MaterialParseJobResponse(BaseModel):  # ← 新增整个类
+    material_id: int
+    version_id: int
+    job_id: str | None
+    parse_status: ParseStatus
+
+
 class MaterialParseResponse(BaseModel):
     material_id: int
     version_id: int
@@ -28,6 +35,7 @@ class MaterialParseResponse(BaseModel):
     original_filename: str
     normalized_format: MaterialFormat
     parse_status: ParseStatus
+    parse_job_id: str | None
     parser_name: str | None
     parser_version: str | None
     content_summary: str | None

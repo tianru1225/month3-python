@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 from app.models.material import Material, MaterialVersion, ParseStatus, utc_now
 
@@ -55,6 +56,50 @@ def get_material_version_for_user(
             Material.user_id == user_id,
         )
     )
+
+
+def get_material_version(db: Session, *, version_id: int) -> MaterialVersion | None:
+    return db.get(MaterialVersion, version_id)
+
+
+def mark_version_queued(
+    db: Session,
+    version: MaterialVersion,
+    *,
+    job_id: str,
+) -> None:
+    version.parse_status = ParseStatus.QUEUED.value
+    version.parse_job_id = job_id
+    version.parser_name = None
+    version.parser_version = None
+    version.parse_error_code = None
+    version.parse_error_message = None
+    version.processed_at = None
+    db.commit()
+    db.refresh(version)
+
+
+def restore_parse_queue_state(
+    db: Session,
+    version: MaterialVersion,
+    *,
+    parse_status: str,
+    parse_job_id: str | None,
+    parser_name: str | None,
+    parser_version: str | None,
+    parse_error_code: str | None,
+    parse_error_message: str | None,
+    processed_at: datetime | None,
+) -> None:
+    version.parse_status = parse_status
+    version.parse_job_id = parse_job_id
+    version.parser_name = parser_name
+    version.parser_version = parser_version
+    version.parse_error_code = parse_error_code
+    version.parse_error_message = parse_error_message
+    version.processed_at = processed_at
+    db.commit()
+    db.refresh(version)
 
 
 def mark_version_parsing(db: Session, version: MaterialVersion) -> None:

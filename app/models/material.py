@@ -103,6 +103,7 @@ class MaterialVersion(Base):
         default=ParseStatus.UPLOADED.value,
         nullable=False,
     )
+    parse_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     content_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_content_location: Mapped[str | None] = mapped_column(
         String(500),

@@ -1,17 +1,18 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.deps.auth import get_current_user
 from app.deps.db import get_db
 from app.models.user import User
-from app.schemas.material import MaterialUploadResponse, MaterialParseResponse
-from app.services.material_service import (
-    MATERIAL_MAX_UPLOAD_BYTES,
-    upload_material_or_raise,
-    parse_material_version_or_raise,
-)
+from app.schemas.material import MaterialParseJobResponse
+from app.schemas.material import MaterialParseResponse
+from app.schemas.material import MaterialUploadResponse
+from app.services.material_service import MATERIAL_MAX_UPLOAD_BYTES
+from app.services.material_service import enqueue_material_parse_or_raise
+from app.services.material_service import get_material_parse_status_or_raise
+from app.services.material_service import upload_material_or_raise
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 
@@ -46,17 +47,39 @@ async def upload_material(
 
 @router.post(
     "/{material_id}/versions/{version_id}/parse",
-    response_model=MaterialParseResponse,
-    status_code=status.HTTP_200_OK,
-    summary="解析Markdown资料",
+    response_model=MaterialParseJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="投递 Markdown 解析任务",
 )
-def parse_material(
+def enqueue_material_parse(
+    material_id: int,
+    version_id: int,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MaterialParseJobResponse:
+    result, created = enqueue_material_parse_or_raise(
+        db,
+        user_id=current_user.id,
+        material_id=material_id,
+        version_id=version_id,
+    )
+    response.status_code = status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK
+    return result
+
+
+@router.get(
+    "/{material_id}/versions/{version_id}/parse",
+    response_model=MaterialParseResponse,
+    summary="查询 Markdown 解析状态",
+)
+def get_material_parse_status(
     material_id: int,
     version_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MaterialParseResponse:
-    return parse_material_version_or_raise(
+    return get_material_parse_status_or_raise(
         db,
         user_id=current_user.id,
         material_id=material_id,

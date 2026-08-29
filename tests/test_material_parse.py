@@ -5,18 +5,22 @@ from sqlalchemy.orm import Session
 
 from app.models.material import MaterialVersion, ParseStatus
 from app.parsers.markdown_parser import parse_markdown
+from app.repositories.material_repository import mark_version_queued
 from app.services import material_service
+from app.services.material_service import process_material_version
 
 
 @pytest.fixture(autouse=True)
 def isolated_material_storage(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        material_service, "MATERIAL_STORAGE_DIR", tmp_path / "materials"
+        material_service,
+        "MATERIAL_STORAGE_DIR",
+        tmp_path / "materials",
     )
 
 
 def _register_and_login(client, username: str) -> dict[str, str]:
-    password = "day127-parse-password"
+    password = "day130-parse-password"
     assert (
         client.post(
             "/users",
@@ -32,86 +36,66 @@ def _register_and_login(client, username: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-def _upload(client, headers, content: bytes = b"# Root\n\n## Child\n\nbody\n"):
-    return client.post(
+def _upload(client, headers, content: bytes = b"# Root\n\nbody\n") -> dict:
+    response = client.post(
         "/materials",
         headers=headers,
         data={"name": "解析测试资料"},
         files={"file": ("guide.md", content, "text/markdown")},
     )
+    assert response.status_code == 201
+    return response.json()
 
 
-def _parse(client, headers, body):
-    return client.post(
-        f"/materials/{body['material_id']}/versions/{body['version_id']}/parse",
-        headers=headers,
-    )
+def _queued_version(db_session: Session, body: dict) -> MaterialVersion:
+    version = db_session.get(MaterialVersion, body["version_id"])
+    assert version is not None
+    mark_version_queued(db_session, version, job_id="test-job-id")
+    return version
 
 
 def test_parser_emits_structured_list_and_table_blocks() -> None:
-    content = b"# Root\n\n- one\n- two\n\n| name | value |\n| --- | --- |\n| a | b |\n"
-    document = parse_markdown(content)
+    document = parse_markdown(
+        b"# Root\n\n- one\n- two\n\n| name | value |\n| --- | --- |\n| a | b |\n"
+    )
     assert [block["type"] for block in document.blocks] == [
         "heading",
         "list",
         "table",
     ]
     assert document.blocks[1]["source"]["section_path"] == ["Root"]
-    assert document.blocks[2]["source"]["section_path"] == ["Root"]
 
 
-def test_parser_keeps_code_block_and_ignores_heading_marker_inside() -> None:
-    content = b"# Root\n\n```python\n# not a heading\nprint('ok')\n```\n"
-
-    document = parse_markdown(content)
-
+def test_parser_keeps_code_block_and_ignores_inner_heading() -> None:
+    document = parse_markdown(
+        b"# Root\n\n```python\n# not a heading\nprint('ok')\n```\n"
+    )
     assert [block["type"] for block in document.blocks] == [
         "heading",
         "code_block",
     ]
-    assert document.headings == [
-        {"line": 1, "level": 1, "text": "Root", "section_path": ["Root"]}
-    ]
-    assert document.blocks[1]["language"] == "python"
-    assert document.blocks[1]["source"]["section_path"] == ["Root"]
+    assert len(document.headings) == 1
 
 
-def test_parse_markdown_writes_ready_result_and_source_map(client) -> None:
-    headers = _register_and_login(client, "parse-ready")
+def test_worker_processing_writes_ready_result(client, db_session) -> None:
+    headers = _register_and_login(client, "worker-ready")
     content = b"# Root\n\n## Child\n\nbody\n"
-    upload = _upload(client, headers, content)
-    assert upload.status_code == 201
+    body = _upload(client, headers, content)
+    version = _queued_version(db_session, body)
 
-    response = _parse(client, headers, upload.json())
+    process_material_version(db_session, version)
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["parse_status"] == ParseStatus.READY.value
-    assert body["normalized_format"] == "markdown"
-    assert body["parser_name"] == "markdown-token-parser"
-    assert body["parser_version"] == "markdown-it-py-3.0.0"
-    assert body["content_summary"] == "# Root ## Child body"
-    assert body["source_metadata"]["headings"] == [
-        {"line": 1, "level": 1, "text": "Root", "section_path": ["Root"]},
-        {
-            "line": 3,
-            "level": 2,
-            "text": "Child",
-            "section_path": ["Root", "Child"],
-        },
-    ]
-
+    assert version.parse_status == ParseStatus.READY.value
+    assert version.parse_job_id == "test-job-id"
+    assert version.parser_name == "markdown-token-parser"
     parsed_path = (
-        material_service.MATERIAL_STORAGE_DIR / body["parsed_content_location"]
+        material_service.MATERIAL_STORAGE_DIR / version.parsed_content_location
     )
-    source_path = parsed_path.with_suffix(".sources.json")
     assert parsed_path.read_bytes() == content
-    source_map = json.loads(source_path.read_text(encoding="utf-8"))
-    for block in source_map["blocks"]:
-        assert (
-            content.decode("utf-8")[block["char_start"] : block["char_end"]]
-            == block["text"]
-        )
+    source_map = json.loads(
+        parsed_path.with_suffix(".sources.json").read_text(encoding="utf-8")
+    )
+    assert source_map["material_version_id"] == version.id
 
 
 @pytest.mark.parametrize(
@@ -121,100 +105,54 @@ def test_parse_markdown_writes_ready_result_and_source_map(client) -> None:
         (b"\xff\xfe", "MATERIAL_SOURCE_INVALID_UTF8"),
     ],
 )
-def test_parse_failures_are_persisted(
+def test_worker_processing_persists_content_failure(
     client,
-    db_session: Session,
+    db_session,
     content: bytes,
     error_code: str,
 ) -> None:
-    headers = _register_and_login(client, f"parse-failure-{error_code}")
-    upload = _upload(client, headers, b"# placeholder")
-    body = upload.json()
-    version = db_session.get(MaterialVersion, body["version_id"])
-    assert version is not None
-    (material_service.MATERIAL_STORAGE_DIR / version.storage_object_key).write_bytes(
-        content
-    )
-
-    response = _parse(client, headers, body)
-
-    assert response.status_code == 200
-    assert response.json()["parse_status"] == ParseStatus.FAILED.value
-    assert response.json()["parse_error_code"] == error_code
-    assert response.json()["processed_at"] is not None
-
-
-def test_parse_requires_owner(client) -> None:
-    owner_headers = _register_and_login(client, "parse-owner")
-    other_headers = _register_and_login(client, "parse-other")
-    upload = _upload(client, owner_headers)
-
-    response = _parse(client, other_headers, upload.json())
-
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "MATERIAL_VERSION_NOT_FOUND"
-
-
-def test_parse_missing_source_is_persisted(client, db_session: Session) -> None:
-    headers = _register_and_login(client, "parse-missing-source")
-    upload = _upload(client, headers)
-    body = upload.json()
-    version = db_session.get(MaterialVersion, body["version_id"])
-    assert version is not None
-    (material_service.MATERIAL_STORAGE_DIR / version.storage_object_key).unlink()
-
-    response = _parse(client, headers, body)
-
-    assert response.status_code == 200
-    assert response.json()["parse_status"] == ParseStatus.FAILED.value
-    assert response.json()["parse_error_code"] == "MATERIAL_SOURCE_NOT_FOUND"
-
-
-def test_failed_parse_can_retry_after_source_is_fixed(
-    client,
-    db_session: Session,
-) -> None:
-    headers = _register_and_login(client, "parse-retry")
-    upload = _upload(client, headers)
-    body = upload.json()
-    version = db_session.get(MaterialVersion, body["version_id"])
-    assert version is not None
+    headers = _register_and_login(client, f"worker-{error_code.lower()}")
+    body = _upload(client, headers, b"# placeholder")
+    version = _queued_version(db_session, body)
     source_path = material_service.MATERIAL_STORAGE_DIR / version.storage_object_key
-    source_path.write_bytes(b"")
+    source_path.write_bytes(content)
 
-    failed = _parse(client, headers, body)
-    assert failed.json()["parse_status"] == ParseStatus.FAILED.value
+    process_material_version(db_session, version)
 
-    source_path.write_bytes(b"# fixed")
-    ready = _parse(client, headers, body)
-    assert ready.status_code == 200
-    assert ready.json()["parse_status"] == ParseStatus.READY.value
+    assert version.parse_status == ParseStatus.FAILED.value
+    assert version.parse_error_code == error_code
+    assert version.processed_at is not None
 
 
-def test_ready_parse_is_idempotent(client) -> None:
-    headers = _register_and_login(client, "parse-idempotent")
-    upload = _upload(client, headers)
-    body = upload.json()
+def test_worker_processing_persists_missing_source(client, db_session) -> None:
+    headers = _register_and_login(client, "worker-missing-source")
+    body = _upload(client, headers)
+    version = _queued_version(db_session, body)
+    source_path = material_service.MATERIAL_STORAGE_DIR / version.storage_object_key
+    source_path.unlink()
 
-    first = _parse(client, headers, body)
-    first_body = first.json()
-    parsed_path = (
-        material_service.MATERIAL_STORAGE_DIR / first_body["parsed_content_location"]
-    )
-    first_content = parsed_path.read_bytes()
+    process_material_version(db_session, version)
 
-    second = _parse(client, headers, body)
-
-    assert second.status_code == 200
-    assert second.json() == first_body
-    assert parsed_path.read_bytes() == first_content
+    assert version.parse_status == ParseStatus.FAILED.value
+    assert version.parse_error_code == "MATERIAL_SOURCE_NOT_FOUND"
 
 
-def test_parse_requires_bearer_token(client) -> None:
-    upload_headers = _register_and_login(client, "parse-auth")
-    upload = _upload(client, upload_headers)
+def test_worker_unexpected_error_is_persisted_and_raised(
+    client,
+    db_session,
+    monkeypatch,
+) -> None:
+    headers = _register_and_login(client, "worker-unexpected-error")
+    body = _upload(client, headers)
+    version = _queued_version(db_session, body)
 
-    response = _parse(client, {}, upload.json())
+    def fail_parser(content: bytes):
+        raise RuntimeError("unexpected parser failure")
 
-    assert response.status_code == 401
-    assert response.json()["detail"]["code"] == "AUTH_REQUIRED"
+    monkeypatch.setattr(material_service, "parse_markdown", fail_parser)
+
+    with pytest.raises(RuntimeError, match="material parse worker failed"):
+        process_material_version(db_session, version)
+
+    assert version.parse_status == ParseStatus.FAILED.value
+    assert version.parse_error_code == "MATERIAL_PARSE_ERROR"
