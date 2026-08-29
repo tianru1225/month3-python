@@ -120,3 +120,11 @@ def list_ready_versions_for_user(db: Session, *, user_id: int) -> list[MaterialV
             .order_by(MaterialVersion.id)
         )
     )
+
+
+def get_material_for_user(
+    db: Session, *, material_id: int, user_id: int
+) -> Material | None:
+    return db.scalar(
+        select(Material).where(Material.id == material_id, Material.user_id == user_id)
+    )

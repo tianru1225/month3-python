@@ -5,7 +5,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.material import MaterialFormat, MaterialVersion
-from app.repositories.material_repository import list_ready_versions_for_user
+from app.repositories.project_material_repository import (
+    list_ready_versions_for_project,
+)
 
 
 def _ready_required_error() -> HTTPException:
@@ -47,10 +49,15 @@ def _has_valid_output(
 def require_ready_materials_or_raise(
     db: Session,
     *,
+    project_id: int,
     user_id: int,
     storage_dir: Path,
 ) -> list[MaterialVersion]:
-    ready_versions = list_ready_versions_for_user(db, user_id=user_id)
+    ready_versions = list_ready_versions_for_project(
+        db,
+        project_id=project_id,
+        user_id=user_id,
+    )
     usable_versions = [
         version
         for version in ready_versions

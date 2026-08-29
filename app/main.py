@@ -19,6 +19,7 @@ from app.routers.projects import router as projects_router
 from app.routers.rq_tasks import router as rq_tasks_router
 from app.routers.tasks import router as tasks_router
 from app.routers.users import router as users_router
+from app.routers.project_materials import router as project_materials_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,3 +82,4 @@ app.include_router(items_router)
 app.include_router(debug_router)
 app.include_router(chat_router)
 app.include_router(auth_router)
+app.include_router(project_materials_router)
