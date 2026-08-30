@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.models.material import Material, MaterialVersion, ParseStatus, utc_now
+from app.core.material_state import transition_parse_status
 
 
 def create_material_upload(
@@ -68,7 +69,7 @@ def mark_version_queued(
     *,
     job_id: str,
 ) -> None:
-    version.parse_status = ParseStatus.QUEUED.value
+    transition_parse_status(version, ParseStatus.QUEUED)
     version.parse_job_id = job_id
     version.parser_name = None
     version.parser_version = None
@@ -91,6 +92,7 @@ def restore_parse_queue_state(
     parse_error_message: str | None,
     processed_at: datetime | None,
 ) -> None:
+    # 队列投递失败时的补偿恢复，不是业务状态转换，因此不走状态机。
     version.parse_status = parse_status
     version.parse_job_id = parse_job_id
     version.parser_name = parser_name
@@ -103,7 +105,7 @@ def restore_parse_queue_state(
 
 
 def mark_version_parsing(db: Session, version: MaterialVersion) -> None:
-    version.parse_status = ParseStatus.PARSING.value
+    transition_parse_status(version, ParseStatus.PARSING)
     db.commit()
     db.refresh(version)
 
@@ -118,7 +120,7 @@ def mark_version_ready(
     parsed_content_location: str,
     source_metadata: dict,
 ) -> None:
-    version.parse_status = ParseStatus.READY.value
+    transition_parse_status(version, ParseStatus.READY)
     version.parser_name = parser_name
     version.parser_version = parser_version
     version.content_summary = content_summary
@@ -140,7 +142,7 @@ def mark_version_failed(
     error_code: str,
     error_message: str,
 ) -> None:
-    version.parse_status = ParseStatus.FAILED.value
+    transition_parse_status(version, ParseStatus.FAILED)
     version.parser_name = parser_name
     version.parser_version = parser_version
     version.content_summary = None
