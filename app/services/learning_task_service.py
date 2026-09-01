@@ -1,17 +1,28 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.task_state import (
+    InvalidTaskStatusTransition,
+    require_task_status_transition,
+)
 from app.models.learning_plan import PlanVersion, PlanVersionStatus
-from app.models.learning_task import LearningTask, TaskPrerequisite
+from app.models.learning_task import (
+    LearningTask,
+    TaskPrerequisite,
+    TaskStatus,
+    utc_now,
+)
 from app.repositories.learning_task_repository import (
     add_edge,
     add_task,
+    compare_and_set_task_status,
     get_edge,
     get_owned_plan_version,
     get_task,
     get_task_by_position,
     list_edges,
     list_prerequisite_ids,
+    list_prerequisite_statuses,
     list_tasks,
 )
 from app.schemas.learning_task import LearningTaskCreate
@@ -46,6 +57,15 @@ def _require_draft(version: PlanVersion) -> None:
         raise _error(
             "PLAN_VERSION_IMMUTABLE",
             "tasks can only be changed on a draft plan version",
+            status.HTTP_409_CONFLICT,
+        )
+
+
+def _require_current_published(version: PlanVersion) -> None:
+    if version.status != PlanVersionStatus.PUBLISHED.value or not version.is_current:
+        raise _error(
+            "PLAN_VERSION_NOT_ACTIVE",
+            "task status can only change on the current published plan version",
             status.HTTP_409_CONFLICT,
         )
 
@@ -228,3 +248,87 @@ def get_task_prerequisite_ids(
             status.HTTP_404_NOT_FOUND,
         )
     return list_prerequisite_ids(db, task_id=task.id)
+
+
+def transition_task_status(
+    db: Session,
+    *,
+    plan_version_id: int,
+    task_id: int,
+    user_id: int,
+    target_status: TaskStatus,
+) -> LearningTask:
+    version = _get_owned_version_or_raise(
+        db,
+        plan_version_id=plan_version_id,
+        user_id=user_id,
+    )
+    _require_current_published(version)
+
+    task = get_task(
+        db,
+        plan_version_id=plan_version_id,
+        task_id=task_id,
+    )
+    if task is None:
+        raise _error(
+            "LEARNING_TASK_NOT_FOUND",
+            "learning task not found in this plan version",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    current_status = TaskStatus(task.status)
+    if current_status == target_status:
+        return task
+
+    try:
+        require_task_status_transition(current_status, target_status)
+    except InvalidTaskStatusTransition as exc:
+        raise _error(
+            "TASK_STATUS_TRANSITION_INVALID",
+            str(exc),
+            status.HTTP_409_CONFLICT,
+        ) from exc
+
+    if target_status == TaskStatus.READY:
+        prerequisite_statuses = list_prerequisite_statuses(
+            db,
+            plan_version_id=plan_version_id,
+            task_id=task.id,
+        )
+        if any(
+            prerequisite_status != TaskStatus.PASSED.value
+            for prerequisite_status in prerequisite_statuses
+        ):
+            raise _error(
+                "TASK_PREREQUISITES_INCOMPLETE",
+                "all task prerequisites must pass before the task is ready",
+                status.HTTP_409_CONFLICT,
+            )
+
+    completed_at = utc_now() if target_status == TaskStatus.PASSED else None
+    try:
+        updated = compare_and_set_task_status(
+            db,
+            plan_version_id=plan_version_id,
+            task_id=task.id,
+            expected_status=current_status.value,
+            target_status=target_status.value,
+            completed_at=completed_at,
+        )
+        if not updated:
+            db.rollback()
+            raise _error(
+                "TASK_STATUS_CONFLICT",
+                "task status changed concurrently",
+                status.HTTP_409_CONFLICT,
+            )
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(task)
+    return task

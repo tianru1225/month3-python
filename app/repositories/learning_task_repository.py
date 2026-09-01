@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.learning_plan import LearningPlan, PlanVersion
@@ -133,3 +133,51 @@ def list_prerequisite_ids(db: Session, *, task_id: int) -> list[int]:
             .order_by(TaskPrerequisite.prerequisite_task_id.asc())
         ).all()
     )
+
+
+def list_prerequisite_statuses(
+    db: Session,
+    *,
+    plan_version_id: int,
+    task_id: int,
+) -> list[str]:
+    return list(
+        db.scalars(
+            select(LearningTask.status)
+            .join(
+                TaskPrerequisite,
+                TaskPrerequisite.prerequisite_task_id == LearningTask.id,
+            )
+            .where(
+                TaskPrerequisite.plan_version_id == plan_version_id,
+                TaskPrerequisite.task_id == task_id,
+                LearningTask.plan_version_id == plan_version_id,
+            )
+            .order_by(TaskPrerequisite.prerequisite_task_id.asc())
+        ).all()
+    )
+
+
+def compare_and_set_task_status(
+    db: Session,
+    *,
+    plan_version_id: int,
+    task_id: int,
+    expected_status: str,
+    target_status: str,
+    completed_at: datetime | None,
+) -> bool:
+    result = db.execute(
+        update(LearningTask)
+        .where(
+            LearningTask.id == task_id,
+            LearningTask.plan_version_id == plan_version_id,
+            LearningTask.status == expected_status,
+        )
+        .values(
+            status=target_status,
+            completed_at=completed_at,
+        )
+        .returning(LearningTask.id)
+    )
+    return result.scalar_one_or_none() is not None
