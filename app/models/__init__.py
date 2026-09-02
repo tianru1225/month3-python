@@ -1,4 +1,5 @@
 from app.models.conversation import Conversation
+from app.models.evidence import Evidence, EvidenceSourceKind, EvidenceType
 from app.models.knowledge import (
     KnowledgeNode,
     KnowledgeNodePrerequisite,
@@ -30,6 +31,9 @@ __all__ = [
     "LearningTask",
     "TaskPrerequisite",
     "TaskStatus",
+    "Evidence",
+    "EvidenceType",
+    "EvidenceSourceKind",
     "Material",
     "MaterialVersion",
     "ProjectMaterialBinding",
