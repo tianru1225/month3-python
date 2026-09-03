@@ -15,6 +15,7 @@ from app.models.learning_plan import (
 )
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskPrerequisite, TaskStatus
+from app.models.mastery import MasteryLevel, MasteryRecord, ReviewItem, ReviewItemStatus
 from app.models.material import Material, MaterialVersion
 from app.models.message import Message
 from app.models.project_material import ProjectMaterialBinding
@@ -38,6 +39,10 @@ __all__ = [
     "Evaluation",
     "EvaluationDecision",
     "RuleEvaluationStatus",
+    "MasteryRecord",
+    "MasteryLevel",
+    "ReviewItem",
+    "ReviewItemStatus",
     "Material",
     "MaterialVersion",
     "ProjectMaterialBinding",
