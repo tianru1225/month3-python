@@ -257,6 +257,7 @@ def transition_task_status(
     task_id: int,
     user_id: int,
     target_status: TaskStatus,
+    commit: bool = True,
 ) -> LearningTask:
     version = _get_owned_version_or_raise(
         db,
@@ -323,7 +324,11 @@ def transition_task_status(
                 "task status changed concurrently",
                 status.HTTP_409_CONFLICT,
             )
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+
     except HTTPException:
         raise
     except Exception:
