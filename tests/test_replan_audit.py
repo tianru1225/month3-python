@@ -169,7 +169,9 @@ def test_accept_reject_and_no_new_version(db_session: Session) -> None:
     user, project, plan, version = context(db_session, "decision")
     proposal = create_proposal(db_session, user, project, version)
     before = db_session.scalar(
-        select(func.count()).select_from(PlanVersion).where(PlanVersion.plan_id == plan.id)
+        select(func.count())
+        .select_from(PlanVersion)
+        .where(PlanVersion.plan_id == plan.id)
     )
     accepted, accepted_event = replan_service.accept_replan_proposal(
         db_session,
@@ -178,7 +180,9 @@ def test_accept_reject_and_no_new_version(db_session: Session) -> None:
         decision_note="accept later publish",
     )
     after = db_session.scalar(
-        select(func.count()).select_from(PlanVersion).where(PlanVersion.plan_id == plan.id)
+        select(func.count())
+        .select_from(PlanVersion)
+        .where(PlanVersion.plan_id == plan.id)
     )
     assert accepted.status == ReplanProposalStatus.ACCEPTED.value
     assert accepted_event.event_type == AuditEventType.PROPOSAL_ACCEPTED.value
@@ -213,9 +217,12 @@ def test_decided_proposal_and_queries(db_session: Session) -> None:
             decision_note="repeat",
         )
     assert error.value.detail["code"] == "REPLAN_PROPOSAL_STATE_CONFLICT"
-    assert replan_service.list_replan_proposals(
-        db_session, project_id=project.id, user_id=user.id
-    )[0].id == proposal.id
+    assert (
+        replan_service.list_replan_proposals(
+            db_session, project_id=project.id, user_id=user.id
+        )[0].id
+        == proposal.id
+    )
 
 
 def test_database_constraints(db_session: Session) -> None:
@@ -316,11 +323,14 @@ def test_decision_transaction_rolls_back(
     stored = db_session.get(ReplanProposal, proposal.id)
     assert stored is not None
     assert stored.status == ReplanProposalStatus.PENDING.value
-    assert db_session.scalar(
-        select(func.count()).select_from(AuditEvent).where(
-            AuditEvent.proposal_id == proposal.id
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.proposal_id == proposal.id)
         )
-    ) == 1
+        == 1
+    )
 
 
 def test_audit_query_ownership(db_session: Session) -> None:
@@ -329,8 +339,11 @@ def test_audit_query_ownership(db_session: Session) -> None:
     _create = create_proposal
     _create(db_session, owner, project, version)
     _create(db_session, outsider, other_project, other_version)
-    assert len(
-        replan_service.list_audit_events(
-            db_session, project_id=project.id, user_id=owner.id
+    assert (
+        len(
+            replan_service.list_audit_events(
+                db_session, project_id=project.id, user_id=owner.id
+            )
         )
-    ) == 1
+        == 1
+    )

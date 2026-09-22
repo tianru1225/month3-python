@@ -6,9 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from app.models.replan import AuditEventType, ReplanProposalStatus
 
 
-NonEmptyText = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1)
-]
+NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class AddedTaskDiff(BaseModel):

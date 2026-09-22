@@ -35,9 +35,10 @@ def create_replan_proposal(
     proposed_content: dict[str, object],
     diff: dict[str, object],
 ) -> tuple[ReplanProposal, AuditEvent]:
-    if replan_repository.get_owned_project(
-        db, project_id=project_id, user_id=user_id
-    ) is None:
+    if (
+        replan_repository.get_owned_project(db, project_id=project_id, user_id=user_id)
+        is None
+    ):
         raise _error(404, "PROJECT_NOT_FOUND", "project not found")
 
     current = replan_repository.get_owned_current_published_version(
@@ -104,9 +105,10 @@ def get_replan_proposal(
 def list_replan_proposals(
     db: Session, *, project_id: int, user_id: int
 ) -> list[ReplanProposal]:
-    if replan_repository.get_owned_project(
-        db, project_id=project_id, user_id=user_id
-    ) is None:
+    if (
+        replan_repository.get_owned_project(db, project_id=project_id, user_id=user_id)
+        is None
+    ):
         raise _error(404, "PROJECT_NOT_FOUND", "project not found")
     return replan_repository.list_owned_proposals(
         db, project_id=project_id, user_id=user_id
@@ -198,9 +200,10 @@ def reject_replan_proposal(
 def list_audit_events(
     db: Session, *, project_id: int, user_id: int
 ) -> list[AuditEvent]:
-    if replan_repository.get_owned_project(
-        db, project_id=project_id, user_id=user_id
-    ) is None:
+    if (
+        replan_repository.get_owned_project(db, project_id=project_id, user_id=user_id)
+        is None
+    ):
         raise _error(404, "PROJECT_NOT_FOUND", "project not found")
     return replan_repository.list_owned_audit_events(
         db, project_id=project_id, user_id=user_id
