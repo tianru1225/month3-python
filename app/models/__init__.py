@@ -19,6 +19,12 @@ from app.models.mastery import MasteryLevel, MasteryRecord, ReviewItem, ReviewIt
 from app.models.material import Material, MaterialVersion
 from app.models.message import Message
 from app.models.project_material import ProjectMaterialBinding
+from app.models.replan import (
+    AuditEvent,
+    AuditEventType,
+    ReplanProposal,
+    ReplanProposalStatus,
+)
 from app.models.user import User
 
 __all__ = [
@@ -50,4 +56,8 @@ __all__ = [
     "KnowledgeNodePrerequisite",
     "KnowledgeNodeSource",
     "KnowledgeNodeStatus",
+    "ReplanProposal",
+    "ReplanProposalStatus",
+    "AuditEvent",
+    "AuditEventType",
 ]
