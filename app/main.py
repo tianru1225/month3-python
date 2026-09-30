@@ -18,6 +18,7 @@ from app.routers.materials import router as materials_router
 from app.routers.projects import router as projects_router
 from app.routers.rq_tasks import router as rq_tasks_router
 from app.routers.tasks import router as tasks_router
+from app.routers.today_tasks import router as today_tasks_router
 from app.routers.users import router as users_router
 from app.routers.project_materials import router as project_materials_router
 from app.routers.knowledge_nodes import router as knowledge_nodes_router
@@ -78,6 +79,7 @@ app.include_router(users_router)
 app.include_router(projects_router)
 app.include_router(materials_router)
 app.include_router(tasks_router)
+app.include_router(today_tasks_router)
 app.include_router(rq_tasks_router)
 app.include_router(items_router)
 app.include_router(debug_router)
