@@ -12,6 +12,7 @@ from app.core.limiter import limiter
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
 from app.routers.debug import router as debug_router
+from app.routers.evidence import router as evidence_router
 from app.routers.health import router as health_router
 from app.routers.items import router as items_router
 from app.routers.materials import router as materials_router
@@ -82,6 +83,7 @@ app.include_router(tasks_router)
 app.include_router(today_tasks_router)
 app.include_router(rq_tasks_router)
 app.include_router(items_router)
+app.include_router(evidence_router)
 app.include_router(debug_router)
 app.include_router(chat_router)
 app.include_router(auth_router)
