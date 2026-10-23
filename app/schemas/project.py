@@ -19,8 +19,8 @@ ExpectedOutcome = Annotated[
 
 class ProjectCreate(BaseModel):
     name: ProjectName
-    goal: ProjectGoal
-    current_level: CurrentLevel
+    goal: ProjectGoal = "从上传资料开始完成系统学习"
+    current_level: CurrentLevel = "beginner"
     deadline: date | None = None
     daily_minutes: int = Field(default=60, ge=1, le=1440)
     weekly_days: int = Field(default=7, ge=1, le=7)

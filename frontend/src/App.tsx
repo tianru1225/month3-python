@@ -358,7 +358,7 @@ function ProjectNameModal({ token, onClose, onCreated }: { token: string; onClos
     setBusy(true);
     setMessage("");
     try {
-      const project = await postJson<Project>("/projects", { name: name.trim(), goal: "从上传资料开始完成系统学习", current_level: "beginner", deadline: null, daily_minutes: 60, weekly_days: 7, expected_outcome: null }, token);
+      const project = await postJson<Project>("/projects", { name: name.trim() }, token);
       await onCreated(project);
     } catch (error) {
       setMessage(errorText(error));
