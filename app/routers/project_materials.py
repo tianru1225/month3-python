@@ -5,6 +5,7 @@ from app.deps.auth import get_current_user
 from app.deps.db import get_db
 from app.models.user import User
 from app.schemas.project_material import ProjectMaterialBindingResponse
+from app.schemas.project_material import ProjectMaterialResponse
 from app.services.project_material_service import bind_material_or_raise
 from app.services.project_material_service import list_project_materials_or_raise
 from app.services.project_material_service import unbind_material_or_raise
@@ -37,14 +38,14 @@ def bind_material(
 
 @router.get(
     "/{project_id}/materials",
-    response_model=list[ProjectMaterialBindingResponse],
+    response_model=list[ProjectMaterialResponse],
     summary="列出项目资料",
 )
 def list_materials(
     project_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[ProjectMaterialBindingResponse]:
+) -> list[ProjectMaterialResponse]:
     return list_project_materials_or_raise(
         db,
         project_id=project_id,

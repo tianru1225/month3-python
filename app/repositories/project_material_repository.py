@@ -23,23 +23,39 @@ def get_active_binding(
     )
 
 
-def list_active_bindings(
+def list_active_materials(
     db: Session,
     *,
     project_id: int,
-) -> list[ProjectMaterialBinding]:
+    user_id: int,
+) -> list[tuple[ProjectMaterialBinding, Material, MaterialVersion | None]]:
+    # 按版本号取最新版本，不能只查 READY，否则会隐藏新版本的解析失败。
+    latest_version_id = (
+        select(MaterialVersion.id)
+        .where(MaterialVersion.material_id == Material.id)
+        .order_by(MaterialVersion.version_number.desc())
+        .limit(1)
+        .correlate(Material)
+        .scalar_subquery()
+    )
     statement = (
-        select(ProjectMaterialBinding)
+        select(ProjectMaterialBinding, Material, MaterialVersion)
+        .join(Material, Material.id == ProjectMaterialBinding.material_id)
+        .outerjoin(MaterialVersion, MaterialVersion.id == latest_version_id)
         .where(
             ProjectMaterialBinding.project_id == project_id,
             ProjectMaterialBinding.unbound_at.is_(None),
+            Material.user_id == user_id,
         )
         .order_by(
             ProjectMaterialBinding.bound_at.asc(),
             ProjectMaterialBinding.id.asc(),
         )
     )
-    return list(db.scalars(statement))
+    return [
+        (binding, material, version)
+        for binding, material, version in db.execute(statement)
+    ]
 
 
 def create_binding(

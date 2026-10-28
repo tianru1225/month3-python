@@ -174,17 +174,21 @@ async function requestJson<T>(path: string, init: RequestInit = {}, token?: stri
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(apiBaseUrl + path, { ...init, headers });
-  const body = await response.json().catch(() => undefined);
+  const body = response.status === 204 ? undefined : await response.json().catch(() => undefined);
   if (!response.ok) throw new ApiRequestError(response.status, readErrorInfo(body));
   return body as T;
 }
 
-export function getJson<T>(path: string, token?: string): Promise<T> {
-  return requestJson<T>(path, {}, token);
+export function getJson<T>(path: string, token?: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { signal }, token);
 }
 
-export function postJson<T>(path: string, body: unknown, token?: string): Promise<T> {
-  return requestJson<T>(path, { method: "POST", body: JSON.stringify(body) }, token);
+export function postJson<T>(path: string, body: unknown, token?: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: "POST", body: JSON.stringify(body), signal }, token);
+}
+
+export function deleteResource(path: string, token?: string, signal?: AbortSignal): Promise<void> {
+  return requestJson<void>(path, { method: "DELETE", signal }, token);
 }
 
 export async function uploadMaterial(
@@ -192,6 +196,7 @@ export async function uploadMaterial(
   name: string,
   file: File,
   description: string,
+  signal?: AbortSignal,
 ): Promise<MaterialUpload> {
   const form = new FormData();
   form.append("name", name);
@@ -201,6 +206,7 @@ export async function uploadMaterial(
     method: "POST",
     headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
     body: form,
+    signal,
   });
   const body = await response.json().catch(() => undefined);
   if (!response.ok) throw new ApiRequestError(response.status, readErrorInfo(body));

@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
-  FileText,
   FolderKanban,
   LayoutDashboard,
   LogOut,
@@ -28,12 +27,12 @@ import {
   StreamEventError,
   Task,
   TodayTasks,
-  uploadMaterial,
   User,
 } from "./api/client";
 import { exampleDecision, exampleTaskCatalog, exampleTasks, localDate, readExampleProgress } from "./learningTasks";
 import type { EvidenceSubmission } from "./learningTasks";
 import LearningChat from "./LearningChat";
+import ProjectMaterials from "./ProjectMaterials";
 import { createActivitySession, createTaskSession, readTaskArchive, taskDisplayId, taskKey } from "./taskSessions";
 import type { SessionUpdate, TaskSource } from "./taskSessions";
 import ReviewPage, { AdjustmentNotice } from "./ReviewPage";
@@ -220,7 +219,6 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<number | null>(null);
-  const [bindings, setBindings] = useState<import("./api/client").MaterialBinding[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const planStorageKey = `learning.plan-versions.${user.id}`;
   const [planVersions, setPlanVersions] = useState<Record<string, string>>(() => {
@@ -249,15 +247,6 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
       setLoading(false);
     }
   }, [token]);
-
-  const loadBindings = useCallback(async () => {
-    if (!projectId) { setBindings([]); return; }
-    try {
-      setBindings(await getJson<import("./api/client").MaterialBinding[]>(`/projects/${projectId}/materials`, token));
-    } catch (error) {
-      setNotice({ tone: "error", text: errorText(error) });
-    }
-  }, [projectId, token]);
 
   const [taskLoading, setTaskLoading] = useState(false);
   const [taskError, setTaskError] = useState("");
@@ -296,7 +285,6 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
   };
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
-  useEffect(() => { void loadBindings(); }, [loadBindings]);
   useEffect(() => {
     const onPopState = () => setNavigation(navigationFromLocation());
     window.addEventListener("popstate", onPopState);
@@ -316,7 +304,6 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
 
   const refresh = async () => {
     await loadProjects();
-    await loadBindings();
     loadTasks();
   };
 
@@ -341,7 +328,7 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
         </div>
       </main>
       {createProjectOpen && <ProjectNameModal token={token} onClose={() => setCreateProjectOpen(false)} onCreated={async (project) => { setCreateProjectOpen(false); await loadProjects(); setProjectId(project.id); setMaterialProject(project); setNotice({ tone: "success", text: "项目已创建，请添加第一份资料" }); }} />}
-      {materialProject && <ProjectMaterialModal token={token} project={materialProject} bindings={bindings} onClose={() => setMaterialProject(null)} onUploaded={async () => { await loadBindings(); setNotice({ tone: "success", text: "资料已上传并绑定，正在解析" }); }} />}
+      {materialProject && <ProjectMaterialModal key={`${user.id}:${materialProject.id}`} token={token} userId={user.id} project={materialProject} onClose={() => setMaterialProject(null)} />}
       {selectedTask && <EvidenceModal task={selectedTask} token={token} onClose={() => setSelectedTask(null)} onResult={(status) => { setTasks((items) => items.map((item) => item.id === selectedTask.id ? { ...item, status } : item)); }} />}
     </div>
   );
@@ -369,33 +356,13 @@ function ProjectNameModal({ token, onClose, onCreated }: { token: string; onClos
   return <SimpleModal title="新建学习项目" description="先给这段学习旅程起个名字。" onClose={onClose}><form className="simple-project-form" onSubmit={submit}><label>项目名称<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：Python 基础" /></label>{message && <p className="form-error"><CircleAlert size={16} />{message}</p>}<button className="primary-button wide rounded-action" type="submit" disabled={busy}>{busy ? "创建中…" : "创建项目"}<ArrowRight size={16} /></button></form></SimpleModal>;
 }
 
-function ProjectMaterialModal({ token, project, bindings, onClose, onUploaded }: { token: string; project: Project; bindings: import("./api/client").MaterialBinding[]; onClose: () => void; onUploaded: () => Promise<void> }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [dragging, setDragging] = useState(false);
+function ProjectMaterialModal({ token, userId, project, onClose }: { token: string; userId: number; project: Project; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  useEscapeToClose(onClose);
-  const chooseFile = (next: File | null) => { if (next) setFile(next); };
-  const submit = async () => {
-    if (!file) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const result = await uploadMaterial(token, file.name, file, "");
-      await postJson(`/projects/${project.id}/materials/${result.material_id}`, {}, token);
-      await postJson(`/materials/${result.material_id}/versions/${result.version_id}/parse`, {}, token);
-      setMessage("资料已添加，正在解析");
-      setFile(null);
-      const input = document.getElementById("project-material-file") as HTMLInputElement | null;
-      if (input) input.value = "";
-      await onUploaded();
-    } catch (error) {
-      setMessage(errorText(error));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return <SimpleModal title={`为「${project.name}」添加资料`} description="上传一份 Markdown 文档，从第一节开始学习。" onClose={onClose}><div className={`material-drop-zone ${dragging ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0] || null); }}><input id="project-material-file" type="file" accept=".md,.markdown,text/markdown,text/plain" onChange={(event) => chooseFile(event.target.files?.[0] || null)} /><label className="material-add-button" htmlFor="project-material-file" aria-label="选择资料"><Plus size={22} /></label><strong>{file ? file.name : "拖入 Markdown 文件"}</strong><span>{file ? `${Math.ceil(file.size / 1024)} KB · 已选择` : "或点击加号从本机选择"}</span></div>{file && <button className="selected-file" type="button" onClick={() => setFile(null)}><FileText size={16} /><span>{file.name}</span><X size={15} /></button>}{bindings.length > 0 && <p className="material-count">当前项目已有 {bindings.length} 份资料</p>}{message && <p className="upload-message">{message}</p>}<button className="primary-button wide rounded-action" type="button" disabled={!file || busy} onClick={() => void submit()}>{busy ? "添加中…" : "添加资料"}<Plus size={16} /></button></SimpleModal>;
+  const close = () => { if (!busy) onClose(); };
+  useEscapeToClose(close);
+  return <SimpleModal title={`为「${project.name}」添加资料`} description="上传 Markdown 文档，查看解析状态后继续学习。" onClose={close}>
+    <ProjectMaterials token={token} userId={userId} projectId={project.id} onBusyChange={setBusy} />
+  </SimpleModal>;
 }
 
 function useEscapeToClose(onClose: () => void) {

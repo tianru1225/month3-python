@@ -4,15 +4,16 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.learning_project import LearningProject
-from app.models.material import Material
+from app.models.material import Material, ParseStatus
 from app.models.project_material import ProjectMaterialBinding
 from app.repositories.material_repository import get_material_for_user
 from app.repositories.project_material_repository import create_binding
 from app.repositories.project_material_repository import get_active_binding
-from app.repositories.project_material_repository import list_active_bindings
+from app.repositories.project_material_repository import list_active_materials
 from app.repositories.project_material_repository import unbind
 from app.repositories.project_repository import get_project_by_id_and_user
-from app.schemas.project_material import ProjectMaterialBindingResponse
+from app.schemas.project_material import ProjectMaterialResponse
+from app.schemas.project_material import ProjectMaterialVersionResponse
 
 
 def _project_not_found() -> HTTPException:
@@ -61,12 +62,6 @@ def _get_owned_material(
     return material
 
 
-def _response(
-    binding: ProjectMaterialBinding,
-) -> ProjectMaterialBindingResponse:
-    return ProjectMaterialBindingResponse.model_validate(binding)
-
-
 def bind_material_or_raise(
     db: Session,
     *,
@@ -100,12 +95,34 @@ def list_project_materials_or_raise(
     *,
     project_id: int,
     user_id: int,
-) -> list[ProjectMaterialBindingResponse]:
+) -> list[ProjectMaterialResponse]:
     _get_owned_project(db, project_id=project_id, user_id=user_id)
-    return [
-        _response(binding)
-        for binding in list_active_bindings(db, project_id=project_id)
-    ]
+    items = []
+    for binding, material, version in list_active_materials(
+        db, project_id=project_id, user_id=user_id
+    ):
+        latest_version = None
+        if version is not None:
+            latest_version = ProjectMaterialVersionResponse(
+                version_id=version.id,
+                version_number=version.version_number,
+                original_filename=version.original_filename,
+                parse_status=ParseStatus(version.parse_status),
+                parse_error_code=version.parse_error_code,
+                parse_error_message=version.parse_error_message,
+            )
+        items.append(
+            ProjectMaterialResponse(
+                id=binding.id,
+                project_id=binding.project_id,
+                material_id=binding.material_id,
+                bound_at=binding.bound_at,
+                unbound_at=binding.unbound_at,
+                name=material.name,
+                latest_version=latest_version,
+            )
+        )
+    return items
 
 
 def unbind_material_or_raise(
