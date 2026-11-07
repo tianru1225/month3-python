@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.learning_project import LearningProject
+from app.models.learning_project import LearningProject, utc_now
 from app.schemas.project import ProjectCreate
 
 
@@ -28,7 +28,10 @@ def list_projects_by_user(
 ) -> list[LearningProject]:
     statement = (
         select(LearningProject)
-        .where(LearningProject.user_id == user_id)
+        .where(
+            LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
+        )
         .order_by(LearningProject.created_at.desc(), LearningProject.id.desc())
     )
     return list(db.scalars(statement).all())
@@ -43,5 +46,30 @@ def get_project_by_id_and_user(
     statement = select(LearningProject).where(
         LearningProject.id == project_id,
         LearningProject.user_id == user_id,
+        LearningProject.deleted_at.is_(None),
     )
     return db.scalar(statement)
+
+
+def soft_delete_owned_project(
+    db: Session, *, project_id: int, user_id: int
+) -> bool:
+    # 这里有意包含已删除行，使本人重复删除仍返回成功。
+    project = db.scalar(
+        select(LearningProject)
+        .where(
+            LearningProject.id == project_id,
+            LearningProject.user_id == user_id,
+        )
+        .with_for_update()
+    )
+    if project is None:
+        return False
+    try:
+        if project.deleted_at is None:
+            project.deleted_at = utc_now()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return True

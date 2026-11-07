@@ -101,6 +101,7 @@ def list_ready_versions_for_project(
         .where(
             LearningProject.id == project_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
             Material.user_id == user_id,
             ProjectMaterialBinding.unbound_at.is_(None),
             MaterialVersion.parse_status == ParseStatus.READY.value,

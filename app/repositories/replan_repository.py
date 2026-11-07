@@ -15,6 +15,7 @@ def get_owned_project(
         select(LearningProject).where(
             LearningProject.id == project_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     )
 
@@ -29,6 +30,7 @@ def get_owned_current_published_version(
         .where(
             LearningProject.id == project_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
             PlanVersion.status == "PUBLISHED",
             PlanVersion.is_current.is_(True),
         )
@@ -44,6 +46,7 @@ def get_owned_proposal(
         .where(
             ReplanProposal.id == proposal_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     )
 
@@ -58,6 +61,7 @@ def list_owned_proposals(
             .where(
                 ReplanProposal.project_id == project_id,
                 LearningProject.user_id == user_id,
+                LearningProject.deleted_at.is_(None),
             )
             .order_by(ReplanProposal.created_at.asc(), ReplanProposal.id.asc())
         ).all()
@@ -137,6 +141,7 @@ def list_owned_audit_events(
             .where(
                 AuditEvent.project_id == project_id,
                 LearningProject.user_id == user_id,
+                LearningProject.deleted_at.is_(None),
             )
             .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
         ).all()

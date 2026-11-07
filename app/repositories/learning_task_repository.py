@@ -18,6 +18,7 @@ def get_owned_plan_version(
         .where(
             PlanVersion.id == plan_version_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     )
 

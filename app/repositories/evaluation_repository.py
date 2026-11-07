@@ -37,6 +37,7 @@ def get_owned_evidence_context(
         .where(
             Evidence.id == evidence_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     ).one_or_none()
     if row is None:

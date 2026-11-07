@@ -18,6 +18,7 @@ def get_owned_project(
         select(LearningProject).where(
             LearningProject.id == project_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     )
 

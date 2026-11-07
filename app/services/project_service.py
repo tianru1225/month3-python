@@ -6,6 +6,7 @@ from app.repositories.project_repository import (
     create_project,
     get_project_by_id_and_user,
     list_projects_by_user,
+    soft_delete_owned_project,
 )
 from app.schemas.project import ProjectCreate
 
@@ -47,3 +48,16 @@ def get_project_or_raise(
             },
         )
     return project
+
+
+def delete_project_or_raise(
+    db: Session, *, project_id: int, user_id: int
+) -> None:
+    if not soft_delete_owned_project(db, project_id=project_id, user_id=user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "project not found",
+            },
+        )

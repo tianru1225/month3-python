@@ -19,6 +19,7 @@ def get_current_published_version_for_project(
             PlanVersion.id == plan_version_id,
             LearningPlan.project_id == project_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
             PlanVersion.status == PlanVersionStatus.PUBLISHED.value,
             PlanVersion.is_current.is_(True),
         )

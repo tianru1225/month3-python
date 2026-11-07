@@ -12,6 +12,7 @@ def get_owned_plan(db: Session, *, plan_id: int, user_id: int) -> LearningPlan |
         .where(
             LearningPlan.id == plan_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     )
 
@@ -26,6 +27,7 @@ def get_owned_version(
         .where(
             PlanVersion.id == version_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     )
 

@@ -47,6 +47,7 @@ def get_owned_evaluation_context(
         .where(
             Evaluation.id == evaluation_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     ).one_or_none()
     if row is None:
@@ -177,6 +178,7 @@ def get_owned_review_item(
         .where(
             ReviewItem.id == review_item_id,
             LearningProject.user_id == user_id,
+            LearningProject.deleted_at.is_(None),
         )
     )
 
