@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Settings2,
@@ -18,6 +19,7 @@ import {
 import {
   ApiRequestError,
   clearStoredAccessToken,
+  deleteResource,
   EvidenceAcceptance,
   getJson,
   getStoredAccessToken,
@@ -33,6 +35,7 @@ import { exampleDecision, exampleTaskCatalog, exampleTasks, localDate, readExamp
 import type { EvidenceSubmission } from "./learningTasks";
 import LearningChat from "./LearningChat";
 import ProjectMaterials from "./ProjectMaterials";
+import "./projectManagement.css";
 import { createActivitySession, createTaskSession, readTaskArchive, taskDisplayId, taskKey } from "./taskSessions";
 import type { SessionUpdate, TaskSource } from "./taskSessions";
 import ReviewPage, { AdjustmentNotice } from "./ReviewPage";
@@ -232,19 +235,46 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
   const [loading, setLoading] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [materialProject, setMaterialProject] = useState<Project | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
+  const projectsRequest = useRef<AbortController | null>(null);
+  const deleteRequest = useRef<AbortController | null>(null);
+  const alive = useRef(true);
+  const workspaceHeading = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      projectsRequest.current?.abort();
+      deleteRequest.current?.abort();
+    };
+  }, []);
 
   const selectedProject = useMemo(() => projects.find((item) => item.id === projectId) || null, [projects, projectId]);
 
   const loadProjects = useCallback(async () => {
+    if (deleteRequest.current) return;
+    projectsRequest.current?.abort();
+    const controller = new AbortController();
+    projectsRequest.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     setLoading(true);
     try {
-      const result = await getJson<Project[]>("/projects", token);
+      const result = await getJson<Project[]>("/projects", token, controller.signal);
+      if (!alive.current || projectsRequest.current !== controller) return;
       setProjects(result);
       setProjectId((current) => current && result.some((item) => item.id === current) ? current : result[0]?.id || null);
+      setMaterialProject((current) => current && result.some((item) => item.id === current.id) ? current : null);
     } catch (error) {
-      setNotice({ tone: "error", text: errorText(error) });
+      if (alive.current && projectsRequest.current === controller) {
+        setNotice({ tone: "error", text: controller.signal.aborted ? "项目列表查询超时，请刷新重试。" : errorText(error) });
+      }
     } finally {
-      setLoading(false);
+      window.clearTimeout(timeout);
+      if (alive.current && projectsRequest.current === controller) {
+        projectsRequest.current = null;
+        setLoading(false);
+      }
     }
   }, [token]);
 
@@ -266,14 +296,15 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
     setTasks([]);
     setSelectedTask(null);
     setTaskError("");
-    if (!projectId || !planVersionId) { setTaskLoading(false); return; }
+    if (!projectId || !planVersionId || deletingProjectId === projectId) { setTaskLoading(false); return; }
+    const controller = new AbortController();
     setTaskLoading(true);
-    void getJson<TodayTasks>(`/projects/${projectId}/plan-versions/${planVersionId}/today-tasks?target_date=${targetDate}`, token)
-      .then((response) => { if (active) setTasks(response.tasks); })
-      .catch((error) => { if (active) setTaskError(errorText(error)); })
-      .finally(() => { if (active) setTaskLoading(false); });
-    return () => { active = false; };
-  }, [projectId, planVersionId, targetDate, token, taskRefresh]);
+    void getJson<TodayTasks>(`/projects/${projectId}/plan-versions/${planVersionId}/today-tasks?target_date=${targetDate}`, token, controller.signal)
+      .then((response) => { if (active && !deleteRequest.current) setTasks(response.tasks); })
+      .catch((error) => { if (active && !deleteRequest.current) setTaskError(errorText(error)); })
+      .finally(() => { if (active && !deleteRequest.current) setTaskLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [projectId, planVersionId, targetDate, token, taskRefresh, deletingProjectId]);
 
   const setPlanVersionId = (value: string) => {
     if (!projectId) return;
@@ -302,6 +333,50 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
     setMaterialProject(project);
   };
 
+  const deleteProject = async (project: Project) => {
+    if (deleteRequest.current || !window.confirm(
+      "删除项目「" + project.name + "」（#" + project.id + "）？\n"
+      + "项目将退出工作区，不能继续在此项目学习。后台学习历史和上传资料会保留。\n"
+      + "这是逻辑删除，不会彻底清除文件；当前没有恢复入口。",
+    )) return;
+    const controller = new AbortController();
+    deleteRequest.current = controller;
+    projectsRequest.current?.abort();
+    projectsRequest.current = null;
+    setLoading(false);
+    setDeletingProjectId(project.id);
+    setMaterialProject(null);
+    setSelectedTask(null);
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    try {
+      await deleteResource("/projects/" + project.id, token, controller.signal);
+      if (!alive.current) return;
+      const remaining = projects.filter((item) => item.id !== project.id);
+      setProjects(remaining);
+      setProjectId((current) => current === project.id ? remaining[0]?.id || null : current);
+      const nextPlans = { ...planVersions };
+      delete nextPlans[project.id];
+      setPlanVersions(nextPlans);
+      let cacheWarning = "";
+      try { localStorage.setItem(planStorageKey, JSON.stringify(nextPlans)); }
+      catch { cacheWarning = " 本机计划设置清理失败；项目是否可见仍以服务器为准。"; }
+      setNotice({ tone: "success", text: "项目已从工作区删除，后台历史和资料保留。" + cacheWarning });
+      workspaceHeading.current?.focus();
+    } catch (error) {
+      if (alive.current) setNotice({
+        tone: "error",
+        text: "删除未确认成功：" + errorText(error) + "。正在重新查询；若网络仍不可用，请恢复后刷新核对。",
+      });
+    } finally {
+      window.clearTimeout(timeout);
+      deleteRequest.current = null;
+      if (alive.current) {
+        setDeletingProjectId(null);
+        void loadProjects();
+      }
+    }
+  };
+
   const refresh = async () => {
     await loadProjects();
     loadTasks();
@@ -320,11 +395,19 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
         <div className="sidebar-footer"><div className="user-chip"><span>{user.username.slice(0, 1).toUpperCase()}</span><div><strong>{user.username}</strong><small>学习者</small></div></div><button className="sidebar-icon" type="button" title="退出登录" onClick={onLogout}><LogOut size={17} /></button></div>
       </aside>
       <main className="console-main">
-        <header className="console-topbar"><button className="mobile-menu" type="button" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div><p className="kicker">{viewLabels[view]}</p><h1>{selectedProject ? selectedProject.name : "你的学习工作台"}</h1></div><div className="topbar-actions"><select aria-label="选择学习项目" value={projectId || ""} onChange={(event) => setProjectId(event.target.value ? Number(event.target.value) : null)}><option value="">选择项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><button className="icon-button" type="button" onClick={() => void refresh()} title="刷新"><RefreshCw size={18} /></button><button className="text-button logout-desktop" type="button" onClick={onLogout}><LogOut size={16} />退出</button></div></header>
+        <header className="console-topbar"><button className="mobile-menu" type="button" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div><p className="kicker">{viewLabels[view]}</p><h1 ref={workspaceHeading} tabIndex={-1}>{selectedProject ? selectedProject.name : "你的学习工作台"}</h1></div><div className="topbar-actions"><select disabled={deletingProjectId !== null} aria-label="选择学习项目" value={projectId || ""} onChange={(event) => setProjectId(event.target.value ? Number(event.target.value) : null)}><option value="">选择项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><button className="icon-button" type="button" disabled={loading || deletingProjectId !== null} onClick={() => void refresh()} title="刷新"><RefreshCw size={18} /></button><button className="text-button logout-desktop" type="button" onClick={onLogout}><LogOut size={16} />退出</button></div></header>
         {notice && <div className={`notice ${notice.tone}`} role="status">{notice.tone === "error" ? <CircleAlert size={17} /> : <CheckCircle2 size={17} />}<span>{notice.text}</span><button type="button" onClick={() => setNotice(null)}><X size={15} /></button></div>}
         <div className="page-content">
-          <div hidden={view === "projects"}><LearningWorkspace key={`${user.id}:${projectId}`} view={view} progressTab={progressTab} onNavigate={navigate} token={token} scope={`${user.id}.${projectId ?? "preview"}`} projectId={projectId} today={targetDate} planVersionId={planVersionId} onPlanVersionChange={setPlanVersionId} tasks={tasks} loading={loading || taskLoading} error={taskError} onEvidence={setSelectedTask} /></div>
-          {view === "projects" && <ProjectsPage projects={projects} onCreateRequest={() => setCreateProjectOpen(true)} onOpenMaterial={openMaterialModal} />}
+          <div hidden={view === "projects"}>
+            {deletingProjectId !== null && deletingProjectId === projectId
+              ? <p role="status">正在删除当前项目，学习会话已暂停…</p>
+              : selectedProject
+                ? <LearningWorkspace key={`${user.id}:${projectId}`} view={view} progressTab={progressTab} onNavigate={navigate} token={token} scope={`${user.id}.${projectId}`} projectId={projectId} today={targetDate} planVersionId={planVersionId} onPlanVersionChange={setPlanVersionId} tasks={tasks} loading={loading || taskLoading} error={taskError} onEvidence={setSelectedTask} />
+                : loading
+                  ? <p role="status">正在加载学习项目…</p>
+                  : <EmptyState icon={<FolderKanban size={22} />} title={projects.length ? "请选择学习项目" : "还没有学习项目"} text="项目以服务器列表为准。创建或选择项目后继续学习。" action="新建项目" onClick={() => setCreateProjectOpen(true)} />}
+          </div>
+          {view === "projects" && <ProjectsPage projects={projects} deletingProjectId={deletingProjectId} onDelete={deleteProject} onCreateRequest={() => setCreateProjectOpen(true)} onOpenMaterial={openMaterialModal} />}
         </div>
       </main>
       {createProjectOpen && <ProjectNameModal token={token} onClose={() => setCreateProjectOpen(false)} onCreated={async (project) => { setCreateProjectOpen(false); await loadProjects(); setProjectId(project.id); setMaterialProject(project); setNotice({ tone: "success", text: "项目已创建，请添加第一份资料" }); }} />}
@@ -579,8 +662,39 @@ function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projec
     </>
   );
 }
-function ProjectsPage({ projects, onCreateRequest, onOpenMaterial }: { projects: Project[]; onCreateRequest: () => void; onOpenMaterial: (project: Project) => void }) {
-  return <><section className="page-intro"><div><p className="kicker">项目空间</p><h2>从一份资料开始，完成一段学习</h2><p>每个项目都是一个学习空间。先命名，再上传你要从头学起的 Markdown 资料。</p></div><button className="primary-button" type="button" onClick={onCreateRequest}><Plus size={17} />新建项目</button></section><div className="project-grid">{projects.length ? projects.map((project) => <button className="project-card project-card-button" key={project.id} type="button" onClick={() => onOpenMaterial(project)}><div className="project-card-top"><span className="status-pill status-ready">{statusLabel(project.status)}</span><span className="project-id">#{project.id}</span></div><h3>{project.name}</h3><p>点击添加或继续添加学习资料</p><dl><div><dt>资料入口</dt><dd>添加 Markdown</dd></div><div><dt>项目状态</dt><dd>{statusLabel(project.status)}</dd></div></dl></button>) : <EmptyState icon={<FolderKanban size={22} />} title="还没有学习项目" text="创建第一个项目，随后上传第一份资料。" action="新建项目" onClick={onCreateRequest} />}</div></>;
+function ProjectsPage({ projects, deletingProjectId, onDelete, onCreateRequest, onOpenMaterial }: {
+  projects: Project[]; deletingProjectId: number | null; onDelete: (project: Project) => Promise<void>;
+  onCreateRequest: () => void; onOpenMaterial: (project: Project) => void;
+}) {
+  const busy = deletingProjectId !== null;
+  return <>
+    <section className="page-intro">
+      <div><p className="kicker">项目空间</p><h2>从一份资料开始，完成一段学习</h2>
+        <p>每个项目都是一个学习空间。先命名，再上传你要从头学起的 Markdown 资料。</p></div>
+      <button className="primary-button" type="button" disabled={busy} onClick={onCreateRequest}><Plus size={17} />新建项目</button>
+    </section>
+    <div className="project-grid">
+      {projects.length ? projects.map((project) =>
+        <article className="project-card project-management-card" key={project.id}>
+          <button className="project-card-open" type="button" disabled={busy} onClick={() => onOpenMaterial(project)}>
+            <div className="project-card-top"><span className="status-pill status-ready">{statusLabel(project.status)}</span><span className="project-id">#{project.id}</span></div>
+            <h3>{project.name}</h3><p>点击添加或继续添加学习资料</p>
+            <dl><div><dt>资料入口</dt><dd>添加 Markdown</dd></div><div><dt>项目状态</dt><dd>{statusLabel(project.status)}</dd></div></dl>
+          </button>
+          <details className="project-actions" onKeyDown={(event) => {
+            if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
+          }}>
+            <summary aria-label={"项目「" + project.name + "」的更多操作"}><MoreHorizontal size={18} /></summary>
+            <button type="button" disabled={busy} onClick={(event) => {
+              const menu = event.currentTarget.closest("details");
+              if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
+              void onDelete(project);
+            }}>{deletingProjectId === project.id ? "正在删除…" : "删除项目"}</button>
+          </details>
+        </article>,
+      ) : <EmptyState icon={<FolderKanban size={22} />} title="还没有学习项目" text="创建第一个项目，随后上传第一份资料。" action="新建项目" onClick={onCreateRequest} />}
+    </div>
+  </>;
 }
 
 function EvidenceModal({ task, token, savedEvidence, onClose, onExampleSubmit, onResult }: { task: Task; token?: string; savedEvidence?: EvidenceSubmission; onClose: () => void; onExampleSubmit?: (evidence: EvidenceSubmission) => Promise<string>; onResult?: (status: string) => void }) {

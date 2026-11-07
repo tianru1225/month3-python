@@ -37,7 +37,7 @@ def _require_project_owner(
     db: Session, *, project_id: int, user_id: int
 ) -> LearningProject:
     project = db.get(LearningProject, project_id)
-    if project is None or project.user_id != user_id:
+    if project is None or project.user_id != user_id or project.deleted_at is not None:
         raise _error(
             "PROJECT_NOT_FOUND", "project not found", status.HTTP_404_NOT_FOUND
         )
