@@ -9,6 +9,7 @@ from app.models.knowledge import (
 from app.models.learning_project import LearningProject
 from app.models.material import Material, MaterialVersion, ParseStatus
 from app.models.project_material import ProjectMaterialBinding
+from app.repositories.material_repository import lock_material
 
 
 def get_owned_project(
@@ -111,6 +112,15 @@ def get_ready_version_for_project(
     user_id: int,
     material_version_id: int,
 ) -> MaterialVersion | None:
+    material_id = db.scalar(
+        select(MaterialVersion.material_id).where(MaterialVersion.id == material_version_id)
+    )
+    if material_id is None:
+        return None
+    material = lock_material(db, material_id=material_id, user_id=user_id)
+    if material is None or material.deletion_started_at is not None:
+        return None
+    # 锁后再查绑定，不能使用等待锁之前看到的绑定状态。
     return db.scalar(
         select(MaterialVersion)
         .join(Material, Material.id == MaterialVersion.material_id)
@@ -125,7 +135,9 @@ def get_ready_version_for_project(
             ProjectMaterialBinding.project_id == project_id,
             ProjectMaterialBinding.unbound_at.is_(None),
             Material.user_id == user_id,
+            Material.deletion_started_at.is_(None),
         )
+        .execution_options(populate_existing=True)
     )
 
 

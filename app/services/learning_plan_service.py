@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.learning_plan import (
@@ -9,6 +10,8 @@ from app.models.learning_plan import (
     PlanVersionStatus,
 )
 from app.models.learning_project import LearningProject
+from app.models.material import Material
+from app.models.project_material import ProjectMaterialBinding
 from app.repositories.learning_plan_repository import (
     add_plan,
     add_version,
@@ -36,10 +39,27 @@ def _now() -> datetime:
 def _require_project_owner(
     db: Session, *, project_id: int, user_id: int
 ) -> LearningProject:
-    project = db.get(LearningProject, project_id)
+    project = db.scalar(
+        select(LearningProject).where(LearningProject.id == project_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     if project is None or project.user_id != user_id or project.deleted_at is not None:
         raise _error(
             "PROJECT_NOT_FOUND", "project not found", status.HTTP_404_NOT_FOUND
+        )
+    pending_material = db.scalar(
+        select(Material.id)
+        .join(ProjectMaterialBinding, ProjectMaterialBinding.material_id == Material.id)
+        .where(
+            ProjectMaterialBinding.project_id == project_id,
+            Material.deletion_started_at.is_not(None),
+        ).limit(1)
+    )
+    if pending_material is not None:
+        raise _error(
+            "MATERIAL_CLEANUP_PENDING",
+            "finish pending material cleanup before creating a plan",
+            status.HTTP_409_CONFLICT,
         )
     return project
 

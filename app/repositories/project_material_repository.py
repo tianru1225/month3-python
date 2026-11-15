@@ -46,6 +46,7 @@ def list_active_materials(
             ProjectMaterialBinding.project_id == project_id,
             ProjectMaterialBinding.unbound_at.is_(None),
             Material.user_id == user_id,
+            Material.deletion_started_at.is_(None),
         )
         .order_by(
             ProjectMaterialBinding.bound_at.asc(),
@@ -103,6 +104,7 @@ def list_ready_versions_for_project(
             LearningProject.user_id == user_id,
             LearningProject.deleted_at.is_(None),
             Material.user_id == user_id,
+            Material.deletion_started_at.is_(None),
             ProjectMaterialBinding.unbound_at.is_(None),
             MaterialVersion.parse_status == ParseStatus.READY.value,
         )

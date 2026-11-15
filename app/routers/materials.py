@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.deps.auth import get_current_user
@@ -13,6 +13,12 @@ from app.services.material_service import MATERIAL_MAX_UPLOAD_BYTES
 from app.services.material_service import enqueue_material_parse_or_raise
 from app.services.material_service import get_material_parse_status_or_raise
 from app.services.material_service import upload_material_or_raise
+
+from app.schemas.material_management import MaterialManagementPage
+from app.services.material_management_service import (
+    delete_material_or_raise,
+    list_materials_for_management,
+)
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 
@@ -85,3 +91,29 @@ def get_material_parse_status(
         material_id=material_id,
         version_id=version_id,
     )
+
+
+
+@router.get("", response_model=MaterialManagementPage, summary="管理本人已上传资料")
+def list_materials(
+    before_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MaterialManagementPage:
+    return list_materials_for_management(
+        db, user_id=current_user.id, before_id=before_id, limit=limit,
+    )
+
+
+@router.delete(
+    "/{material_id}", status_code=status.HTTP_204_NO_CONTENT,
+    summary="彻底删除无引用且未在解析的资料",
+)
+def delete_material(
+    material_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    delete_material_or_raise(db, material_id=material_id, user_id=current_user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

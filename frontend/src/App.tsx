@@ -35,6 +35,7 @@ import { exampleDecision, exampleTaskCatalog, exampleTasks, localDate, readExamp
 import type { EvidenceSubmission } from "./learningTasks";
 import LearningChat from "./LearningChat";
 import ProjectMaterials from "./ProjectMaterials";
+import MaterialManager from "./MaterialManager";
 import "./projectManagement.css";
 import { createActivitySession, createTaskSession, readTaskArchive, taskDisplayId, taskKey } from "./taskSessions";
 import type { SessionUpdate, TaskSource } from "./taskSessions";
@@ -235,6 +236,7 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
   const [loading, setLoading] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [materialProject, setMaterialProject] = useState<Project | null>(null);
+  const [materialManagerOpen, setMaterialManagerOpen] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
   const projectsRequest = useRef<AbortController | null>(null);
   const deleteRequest = useRef<AbortController | null>(null);
@@ -407,11 +409,12 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
                   ? <p role="status">正在加载学习项目…</p>
                   : <EmptyState icon={<FolderKanban size={22} />} title={projects.length ? "请选择学习项目" : "还没有学习项目"} text="项目以服务器列表为准。创建或选择项目后继续学习。" action="新建项目" onClick={() => setCreateProjectOpen(true)} />}
           </div>
-          {view === "projects" && <ProjectsPage projects={projects} deletingProjectId={deletingProjectId} onDelete={deleteProject} onCreateRequest={() => setCreateProjectOpen(true)} onOpenMaterial={openMaterialModal} />}
+          {view === "projects" && <ProjectsPage projects={projects} deletingProjectId={deletingProjectId} onDelete={deleteProject} onManageRequest={() => setMaterialManagerOpen(true)} onCreateRequest={() => setCreateProjectOpen(true)} onOpenMaterial={openMaterialModal} />}
         </div>
       </main>
       {createProjectOpen && <ProjectNameModal token={token} onClose={() => setCreateProjectOpen(false)} onCreated={async (project) => { setCreateProjectOpen(false); await loadProjects(); setProjectId(project.id); setMaterialProject(project); setNotice({ tone: "success", text: "项目已创建，请添加第一份资料" }); }} />}
-      {materialProject && <ProjectMaterialModal key={`${user.id}:${materialProject.id}`} token={token} userId={user.id} project={materialProject} onClose={() => setMaterialProject(null)} />}
+      {materialProject && <ProjectMaterialModal key={`${user.id}:${materialProject.id}`} token={token} userId={user.id} project={materialProject} onManage={() => { setMaterialProject(null); setMaterialManagerOpen(true); }} onClose={() => setMaterialProject(null)} />}
+      {materialManagerOpen && <MaterialManagementModal token={token} userId={user.id} onClose={() => setMaterialManagerOpen(false)} />}
       {selectedTask && <EvidenceModal task={selectedTask} token={token} onClose={() => setSelectedTask(null)} onResult={(status) => { setTasks((items) => items.map((item) => item.id === selectedTask.id ? { ...item, status } : item)); }} />}
     </div>
   );
@@ -439,12 +442,24 @@ function ProjectNameModal({ token, onClose, onCreated }: { token: string; onClos
   return <SimpleModal title="新建学习项目" description="先给这段学习旅程起个名字。" onClose={onClose}><form className="simple-project-form" onSubmit={submit}><label>项目名称<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：Python 基础" /></label>{message && <p className="form-error"><CircleAlert size={16} />{message}</p>}<button className="primary-button wide rounded-action" type="submit" disabled={busy}>{busy ? "创建中…" : "创建项目"}<ArrowRight size={16} /></button></form></SimpleModal>;
 }
 
-function ProjectMaterialModal({ token, userId, project, onClose }: { token: string; userId: number; project: Project; onClose: () => void }) {
+function ProjectMaterialModal({ token, userId, project, onClose, onManage }: { token: string; userId: number; project: Project; onClose: () => void; onManage: () => void }) {
   const [busy, setBusy] = useState(false);
   const close = () => { if (!busy) onClose(); };
   useEscapeToClose(close);
   return <SimpleModal title={`为「${project.name}」添加资料`} description="上传 Markdown 文档，查看解析状态后继续学习。" onClose={close}>
     <ProjectMaterials token={token} userId={userId} projectId={project.id} onBusyChange={setBusy} />
+    <button className="text-button" type="button" disabled={busy} onClick={onManage}>管理已上传资料</button>
+  </SimpleModal>;
+}
+
+function MaterialManagementModal({ token, userId, onClose }: {
+  token: string; userId: number; onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const close = () => { if (!busy) onClose(); };
+  useEscapeToClose(close);
+  return <SimpleModal title="管理已上传资料" description="查看所有上传记录，清理不再使用的资料。" onClose={close}>
+    <MaterialManager token={token} userId={userId} onBusyChange={setBusy} />
   </SimpleModal>;
 }
 
@@ -662,16 +677,16 @@ function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projec
     </>
   );
 }
-function ProjectsPage({ projects, deletingProjectId, onDelete, onCreateRequest, onOpenMaterial }: {
+function ProjectsPage({ projects, deletingProjectId, onDelete, onCreateRequest, onOpenMaterial, onManageRequest }: {
   projects: Project[]; deletingProjectId: number | null; onDelete: (project: Project) => Promise<void>;
-  onCreateRequest: () => void; onOpenMaterial: (project: Project) => void;
+  onCreateRequest: () => void; onOpenMaterial: (project: Project) => void; onManageRequest: () => void;
 }) {
   const busy = deletingProjectId !== null;
   return <>
     <section className="page-intro">
       <div><p className="kicker">项目空间</p><h2>从一份资料开始，完成一段学习</h2>
         <p>每个项目都是一个学习空间。先命名，再上传你要从头学起的 Markdown 资料。</p></div>
-      <button className="primary-button" type="button" disabled={busy} onClick={onCreateRequest}><Plus size={17} />新建项目</button>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><button className="secondary-button" type="button" disabled={busy} onClick={onManageRequest}>管理已上传资料</button><button className="primary-button" type="button" disabled={busy} onClick={onCreateRequest}><Plus size={17} />新建项目</button></div>
     </section>
     <div className="project-grid">
       {projects.length ? projects.map((project) =>

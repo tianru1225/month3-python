@@ -15,6 +15,7 @@ from app.models.material import MaterialFormat, MaterialVersion, ParseStatus
 from app.parsers.markdown_parser import MarkdownParseError, parse_markdown
 from app.repositories.material_repository import create_material_upload
 from app.repositories.material_repository import get_material_version_for_user
+from app.repositories.material_repository import lock_material
 from app.repositories.material_repository import mark_version_failed
 from app.repositories.material_repository import mark_version_parsing
 from app.repositories.material_repository import mark_version_queued
@@ -185,12 +186,14 @@ def _get_owned_version(
     user_id: int,
     material_id: int,
     version_id: int,
+    lock: bool = False,
 ) -> MaterialVersion:
     version = get_material_version_for_user(
         db,
         material_id=material_id,
         version_id=version_id,
         user_id=user_id,
+        lock=lock,
     )
     if version is None:
         raise _error(
@@ -243,6 +246,7 @@ def enqueue_material_parse_or_raise(
         user_id=user_id,
         material_id=material_id,
         version_id=version_id,
+        lock=True,
     )
     if version.parse_status in {
         ParseStatus.QUEUED.value,
@@ -275,6 +279,7 @@ def enqueue_material_parse_or_raise(
         restore_parse_queue_state(
             db,
             version,
+            expected_job_id=job_id,
             parse_status=previous[0],
             parse_job_id=previous[1],
             parser_name=previous[2],
@@ -308,6 +313,10 @@ def get_material_parse_status_or_raise(
 
 
 def process_material_version(db: Session, version: MaterialVersion) -> None:
+    material = lock_material(db, material_id=version.material_id)
+    if material is None or material.deletion_started_at is not None:
+        raise _error(409, "MATERIAL_DELETING", "material is being deleted")
+    db.refresh(version)
     mark_version_parsing(db, version)
     parsed_path = (
         MATERIAL_STORAGE_DIR / "parsed" / str(version.material_id) / f"{version.id}.md"
