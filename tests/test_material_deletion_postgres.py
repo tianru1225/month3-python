@@ -122,8 +122,8 @@ def test_enqueue_claim_blocks_delete_until_worker_finishes(
     jobs = []
 
     class LocalQueue:
-        def enqueue(self, function, version_id, job_id, **options):
-            jobs.append((version_id, job_id))
+        def enqueue(self, function, version_id, task_job_id, **options):
+            jobs.append((version_id, task_job_id))
 
     def enqueue(db):
         material_service.enqueue_material_parse_or_raise(
