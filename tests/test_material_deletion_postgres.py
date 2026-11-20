@@ -33,8 +33,7 @@ def postgres_context(tmp_path, monkeypatch):
         db.add(user)
         db.flush()
         project = LearningProject(
-            user_id=user.id, name="Race check", goal="Check serialization",
-            current_level="beginner",
+            user_id=user.id, name="Race check",
         )
         db.add(project)
         db.commit()
@@ -104,7 +103,7 @@ def test_delete_serializes_with_binding_and_enqueue(postgres_context):
 
     def enqueue(db):
         material_service.enqueue_material_parse_or_raise(
-            db, user_id=user_id, material_id=item.material_id, version_id=item.version_id,
+            db, user_id=user_id, material_id=item.material_id,
         )
 
     pause_first_commit(engine, remove, [bind, enqueue])
@@ -122,13 +121,13 @@ def test_enqueue_claim_blocks_delete_until_worker_finishes(
     jobs = []
 
     class LocalQueue:
-        def enqueue(self, function, version_id, task_job_id, **options):
-            jobs.append((version_id, task_job_id))
+        def enqueue(self, function, material_id, task_job_id, **options):
+            jobs.append((material_id, task_job_id))
 
     def enqueue(db):
         material_service.enqueue_material_parse_or_raise(
             db, user_id=user_id, material_id=item.material_id,
-            version_id=item.version_id, queue=LocalQueue(),
+            queue=LocalQueue(),
         )
 
     def remove(db):
@@ -142,8 +141,8 @@ def test_enqueue_claim_blocks_delete_until_worker_finishes(
             remove(db)
         assert caught.value.status_code == 409
     monkeypatch.setattr(material_jobs, "SessionLocal", lambda: Session(engine))
-    version_id, job_id = jobs[0]
-    assert material_jobs.parse_material_version_job(version_id, job_id) == "READY"
+    material_id, job_id = jobs[0]
+    assert material_jobs.parse_material_job(material_id, job_id) == "READY"
     with Session(engine) as db:
         remove(db)
-    assert material_jobs.parse_material_version_job(version_id, job_id) == "ignored:not_found"
+    assert material_jobs.parse_material_job(material_id, job_id) == "ignored:not_found"

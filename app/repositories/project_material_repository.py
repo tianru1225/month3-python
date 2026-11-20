@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.learning_project import LearningProject
-from app.models.material import Material, MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.models.project_material import ProjectMaterialBinding
 
 
@@ -28,20 +28,11 @@ def list_active_materials(
     *,
     project_id: int,
     user_id: int,
-) -> list[tuple[ProjectMaterialBinding, Material, MaterialVersion | None]]:
-    # 按版本号取最新版本，不能只查 READY，否则会隐藏新版本的解析失败。
-    latest_version_id = (
-        select(MaterialVersion.id)
-        .where(MaterialVersion.material_id == Material.id)
-        .order_by(MaterialVersion.version_number.desc())
-        .limit(1)
-        .correlate(Material)
-        .scalar_subquery()
-    )
+) -> list[tuple[ProjectMaterialBinding, Material]]:
+    # 资料本身保存解析状态，失败状态也必须返回。
     statement = (
-        select(ProjectMaterialBinding, Material, MaterialVersion)
+        select(ProjectMaterialBinding, Material)
         .join(Material, Material.id == ProjectMaterialBinding.material_id)
-        .outerjoin(MaterialVersion, MaterialVersion.id == latest_version_id)
         .where(
             ProjectMaterialBinding.project_id == project_id,
             ProjectMaterialBinding.unbound_at.is_(None),
@@ -54,8 +45,8 @@ def list_active_materials(
         )
     )
     return [
-        (binding, material, version)
-        for binding, material, version in db.execute(statement)
+        (binding, material)
+        for binding, material in db.execute(statement)
     ]
 
 
@@ -85,15 +76,14 @@ def unbind(
     db.commit()
 
 
-def list_ready_versions_for_project(
+def list_ready_materials_for_project(
     db: Session,
     *,
     project_id: int,
     user_id: int,
-) -> list[MaterialVersion]:
+) -> list[Material]:
     statement = (
-        select(MaterialVersion)
-        .join(Material, Material.id == MaterialVersion.material_id)
+        select(Material)
         .join(
             ProjectMaterialBinding,
             ProjectMaterialBinding.material_id == Material.id,
@@ -106,8 +96,8 @@ def list_ready_versions_for_project(
             Material.user_id == user_id,
             Material.deletion_started_at.is_(None),
             ProjectMaterialBinding.unbound_at.is_(None),
-            MaterialVersion.parse_status == ParseStatus.READY.value,
+            Material.parse_status == ParseStatus.READY.value,
         )
-        .order_by(MaterialVersion.id)
+        .order_by(Material.id)
     )
     return list(db.scalars(statement))

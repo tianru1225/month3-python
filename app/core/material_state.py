@@ -1,8 +1,8 @@
-from app.models.material import MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 
 
 class InvalidMaterialStateTransition(ValueError):
-    """Raised when a material version attempts an unsupported status change."""
+    """Raised when a material attempts an unsupported status change."""
 
 
 _ALLOWED_TRANSITIONS: dict[ParseStatus, frozenset[ParseStatus]] = {
@@ -37,10 +37,10 @@ def ensure_transition_allowed(
 
 
 def transition_parse_status(
-    version: MaterialVersion,
+    material: Material,
     target: ParseStatus,
 ) -> None:
     """Validate and apply a status change without committing the session."""
-    current = _as_status(version.parse_status, field="current status")
+    current = _as_status(material.parse_status, field="current status")
     ensure_transition_allowed(current, target)
-    version.parse_status = target.value
+    material.parse_status = target.value

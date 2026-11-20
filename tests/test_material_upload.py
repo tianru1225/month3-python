@@ -3,7 +3,7 @@ from hashlib import sha256
 import pytest
 from sqlalchemy import func, select
 
-from app.models.material import Material, MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.services import material_service
 
 
@@ -77,14 +77,13 @@ def test_upload_markdown_creates_owned_record_and_file(
     assert body["parse_status"] == ParseStatus.UPLOADED.value
     assert body["content_hash"] == sha256(content).hexdigest()
 
-    version = db_session.get(MaterialVersion, body["version_id"])
     material = db_session.get(Material, body["material_id"])
     assert material is not None
-    assert version is not None
-    assert version.material_id == material.id
+    assert 'version_id' not in body and 'version_number' not in body
+    assert 'enabled' not in body
     assert (
         material_service.MATERIAL_STORAGE_DIR.joinpath(
-            version.storage_object_key
+            material.storage_object_key
         ).read_bytes()
         == content
     )

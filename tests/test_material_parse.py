@@ -3,11 +3,11 @@ import json
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.material import MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.parsers.markdown_parser import parse_markdown
-from app.repositories.material_repository import mark_version_queued
+from app.repositories.material_repository import mark_material_queued
 from app.services import material_service
-from app.services.material_service import process_material_version
+from app.services.material_service import process_material
 
 
 @pytest.fixture(autouse=True)
@@ -47,10 +47,10 @@ def _upload(client, headers, content: bytes = b"# Root\n\nbody\n") -> dict:
     return response.json()
 
 
-def _queued_version(db_session: Session, body: dict) -> MaterialVersion:
-    version = db_session.get(MaterialVersion, body["version_id"])
+def _queued_version(db_session: Session, body: dict) -> Material:
+    version = db_session.get(Material, body["material_id"])
     assert version is not None
-    mark_version_queued(db_session, version, job_id="test-job-id")
+    mark_material_queued(db_session, version, job_id="test-job-id")
     return version
 
 
@@ -83,7 +83,7 @@ def test_worker_processing_writes_ready_result(client, db_session) -> None:
     body = _upload(client, headers, content)
     version = _queued_version(db_session, body)
 
-    process_material_version(db_session, version)
+    process_material(db_session, version)
 
     assert version.parse_status == ParseStatus.READY.value
     assert version.parse_job_id == "test-job-id"
@@ -95,7 +95,7 @@ def test_worker_processing_writes_ready_result(client, db_session) -> None:
     source_map = json.loads(
         parsed_path.with_suffix(".sources.json").read_text(encoding="utf-8")
     )
-    assert source_map["material_version_id"] == version.id
+    assert source_map["material_id"] == version.id
 
 
 @pytest.mark.parametrize(
@@ -117,7 +117,7 @@ def test_worker_processing_persists_content_failure(
     source_path = material_service.MATERIAL_STORAGE_DIR / version.storage_object_key
     source_path.write_bytes(content)
 
-    process_material_version(db_session, version)
+    process_material(db_session, version)
 
     assert version.parse_status == ParseStatus.FAILED.value
     assert version.parse_error_code == error_code
@@ -131,7 +131,7 @@ def test_worker_processing_persists_missing_source(client, db_session) -> None:
     source_path = material_service.MATERIAL_STORAGE_DIR / version.storage_object_key
     source_path.unlink()
 
-    process_material_version(db_session, version)
+    process_material(db_session, version)
 
     assert version.parse_status == ParseStatus.FAILED.value
     assert version.parse_error_code == "MATERIAL_SOURCE_NOT_FOUND"
@@ -152,7 +152,7 @@ def test_worker_unexpected_error_is_persisted_and_raised(
     monkeypatch.setattr(material_service, "parse_markdown", fail_parser)
 
     with pytest.raises(RuntimeError, match="material parse worker failed"):
-        process_material_version(db_session, version)
+        process_material(db_session, version)
 
     assert version.parse_status == ParseStatus.FAILED.value
     assert version.parse_error_code == "MATERIAL_PARSE_ERROR"

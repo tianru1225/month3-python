@@ -44,8 +44,6 @@ def _context(
     project = LearningProject(
         user_id=user.id,
         name=f"{username} project",
-        goal="verify evaluation",
-        current_level="beginner",
     )
     db_session.add(project)
     db_session.commit()

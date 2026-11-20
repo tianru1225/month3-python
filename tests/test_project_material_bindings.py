@@ -1,6 +1,6 @@
 from sqlalchemy import func, select
 
-from app.models.material import MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.models.project_material import ProjectMaterialBinding
 
 
@@ -26,8 +26,6 @@ def _create_project(client, headers: dict[str, str], name: str) -> dict:
         headers=headers,
         json={
             "name": name,
-            "goal": "验证项目资料绑定",
-            "current_level": "入门",
         },
     )
     assert response.status_code == 201
@@ -183,7 +181,7 @@ def test_binding_uploaded_material_does_not_change_parse_status(
     response = _bind(client, headers, project["id"], material["material_id"])
     assert response.status_code == 201
 
-    version = db_session.get(MaterialVersion, material["version_id"])
+    version = db_session.get(Material, material["material_id"])
     assert version is not None
     assert version.parse_status == ParseStatus.UPLOADED.value
 

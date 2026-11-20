@@ -7,7 +7,7 @@ from app.models.knowledge import (
     KnowledgeNodeSource,
 )
 from app.models.learning_project import LearningProject
-from app.models.material import Material, MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.models.project_material import ProjectMaterialBinding
 from app.repositories.material_repository import lock_material
 
@@ -105,33 +105,27 @@ def delete_edge(db: Session, edge: KnowledgeNodePrerequisite) -> None:
     db.commit()
 
 
-def get_ready_version_for_project(
+def get_ready_material_for_project(
     db: Session,
     *,
     project_id: int,
     user_id: int,
-    material_version_id: int,
-) -> MaterialVersion | None:
-    material_id = db.scalar(
-        select(MaterialVersion.material_id).where(MaterialVersion.id == material_version_id)
-    )
-    if material_id is None:
-        return None
+    material_id: int,
+) -> Material | None:
     material = lock_material(db, material_id=material_id, user_id=user_id)
     if material is None or material.deletion_started_at is not None:
         return None
     # 锁后再查绑定，不能使用等待锁之前看到的绑定状态。
     return db.scalar(
-        select(MaterialVersion)
-        .join(Material, Material.id == MaterialVersion.material_id)
+        select(Material)
         .join(
             ProjectMaterialBinding,
             ProjectMaterialBinding.material_id == Material.id,
         )
         .where(
-            MaterialVersion.id == material_version_id,
-            MaterialVersion.parse_status == ParseStatus.READY.value,
-            MaterialVersion.normalized_format == "markdown",
+            Material.id == material_id,
+            Material.parse_status == ParseStatus.READY.value,
+            Material.normalized_format == "markdown",
             ProjectMaterialBinding.project_id == project_id,
             ProjectMaterialBinding.unbound_at.is_(None),
             Material.user_id == user_id,
@@ -145,7 +139,7 @@ def create_source(
     db: Session,
     *,
     node_id: int,
-    material_version_id: int,
+    material_id: int,
     block_index: int,
     line_start: int,
     line_end: int,
@@ -155,7 +149,7 @@ def create_source(
 ) -> KnowledgeNodeSource:
     source = KnowledgeNodeSource(
         node_id=node_id,
-        material_version_id=material_version_id,
+        material_id=material_id,
         block_index=block_index,
         line_start=line_start,
         line_end=line_end,

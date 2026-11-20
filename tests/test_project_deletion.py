@@ -12,7 +12,7 @@ from app.models.learning_plan import LearningPlan, PlanVersion
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskStatus
 from app.models.mastery import MasteryRecord, ReviewItem
-from app.models.material import Material, MaterialVersion
+from app.models.material import Material
 from app.models.project_material import ProjectMaterialBinding
 from app.models.replan import AuditEvent, ReplanProposal
 from app.models.user import User
@@ -85,7 +85,7 @@ def learning_context(client, db_session, tmp_path, monkeypatch):
             f"/projects/{project}/materials/{material['material_id']}",
             headers=headers,
         ).status_code == 201
-    material_version = db.get(MaterialVersion, material["version_id"])
+    material_version = db.get(Material, material["material_id"])
     assert material_version is not None
     original = storage / material_version.storage_object_key
     assert original.read_bytes() == b"# Notes\n\nKeep this file.\n"
@@ -194,7 +194,7 @@ def test_deleted_project_blocks_http_but_keeps_history_and_shared_files(
     assert len(client.get(materials_path, headers=headers).json()) == 1
     assert client.get(node_path, headers=headers).status_code == 200
     models = (
-        LearningProject, Material, MaterialVersion, ProjectMaterialBinding,
+        LearningProject, Material, ProjectMaterialBinding,
         KnowledgeNode, LearningPlan, PlanVersion, LearningTask,
         Evidence, Evaluation, MasteryRecord, ReviewItem, ReplanProposal, AuditEvent,
     )
@@ -230,7 +230,7 @@ def test_deleted_project_blocks_http_but_keeps_history_and_shared_files(
     assert kept.status_code == 200
     assert [item["material_id"] for item in kept.json()] == [c["material"]["material_id"]]
     material = c["material"]
-    parse_path = f"/materials/{material['material_id']}/versions/{material['version_id']}/parse"
+    parse_path = f"/materials/{material['material_id']}/parse"
     assert client.get(parse_path, headers=headers).status_code == 200
     assert db_session.get(LearningTask, c["task_id"]).status == "PASSED"
     assert db_session.get(ReviewItem, c["review_id"]).status == "PENDING"

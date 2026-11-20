@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.learning_project import LearningProject
-from app.models.material import Material, MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.models.project_material import ProjectMaterialBinding
 from app.services import knowledge_service
 
@@ -47,8 +47,6 @@ def _project(db_session, user_id: int, name: str) -> LearningProject:
     project = LearningProject(
         user_id=user_id,
         name=name,
-        goal="建立项目知识点图",
-        current_level="beginner",
     )
     db_session.add(project)
     db_session.commit()
@@ -179,12 +177,8 @@ def test_self_and_cross_project_edges_are_rejected(client, db_session) -> None:
 
 
 def _ready_source(db_session, project_id: int, user_id: int, tmp_path):
-    material = Material(user_id=user_id, name="source")
-    db_session.add(material)
-    db_session.flush()
-    version = MaterialVersion(
-        material_id=material.id,
-        version_number=1,
+    version = Material(
+        user_id=user_id, name="source",
         original_filename="guide.md",
         normalized_format="markdown",
         mime_type="text/markdown",
@@ -205,10 +199,10 @@ def _ready_source(db_session, project_id: int, user_id: int, tmp_path):
     version.source_metadata = {
         "kind": "markdown",
         "line_count": 3,
-        "sources_path": f"parsed/{material.id}/{version.id}.sources.json",
+        "sources_path": f"parsed/{version.id}/{version.id}.sources.json",
     }
     db_session.add(
-        ProjectMaterialBinding(project_id=project_id, material_id=material.id)
+        ProjectMaterialBinding(project_id=project_id, material_id=version.id)
     )
     db_session.commit()
 
@@ -216,14 +210,14 @@ def _ready_source(db_session, project_id: int, user_id: int, tmp_path):
         tmp_path
         / "materials"
         / "parsed"
-        / str(material.id)
+        / str(version.id)
         / f"{version.id}.sources.json"
     )
     source_path.parent.mkdir(parents=True)
     source_path.write_text(
         json.dumps(
             {
-                "material_version_id": version.id,
+                "material_id": version.id,
                 "blocks": [
                     {
                         "text": "# Foundations\n\nMarkdown graph\n",
@@ -254,7 +248,7 @@ def test_source_requires_real_ready_binding_and_location(
         f"/projects/{project.id}/knowledge-nodes/{node['id']}/sources",
         headers=headers,
         json={
-            "material_version_id": version.id,
+            "material_id": version.id,
             "block_index": 0,
             "line_start": 1,
             "line_end": 3,
@@ -264,7 +258,7 @@ def test_source_requires_real_ready_binding_and_location(
     )
 
     assert response.status_code == 201, response.text
-    assert response.json()["material_version_id"] == version.id
+    assert response.json()["material_id"] == version.id
     assert response.json()["quote_hash"]
 
 
@@ -277,7 +271,7 @@ def test_source_rejects_fake_location_and_unbound_version(
     node = _node(client, headers, project.id, "Source node")
     version = _ready_source(db_session, project.id, user_id, tmp_path)
     db_session.query(ProjectMaterialBinding).filter(
-        ProjectMaterialBinding.material_id == version.material_id
+        ProjectMaterialBinding.material_id == version.id
     ).delete()
     db_session.commit()
 
@@ -285,7 +279,7 @@ def test_source_rejects_fake_location_and_unbound_version(
         f"/projects/{project.id}/knowledge-nodes/{node['id']}/sources",
         headers=headers,
         json={
-            "material_version_id": version.id,
+            "material_id": version.id,
             "block_index": 0,
             "line_start": 999,
             "line_end": 999,

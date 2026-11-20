@@ -44,8 +44,6 @@ def _context(client, db, username: str):
         headers=headers,
         json={
             "name": f"{username} project",
-            "goal": "test today's tasks",
-            "current_level": "beginner",
         },
     ).json()
     user = db.scalar(select(User).where(User.username == username))

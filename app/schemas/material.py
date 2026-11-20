@@ -7,11 +7,8 @@ from app.models.material import MaterialFormat, ParseStatus
 
 class MaterialUploadResponse(BaseModel):
     material_id: int
-    version_id: int
     name: str
     description: str | None
-    enabled: bool
-    version_number: int
     original_filename: str
     normalized_format: MaterialFormat
     mime_type: str
@@ -21,17 +18,14 @@ class MaterialUploadResponse(BaseModel):
     uploaded_at: datetime
 
 
-class MaterialParseJobResponse(BaseModel):  # ← 新增整个类
+class MaterialParseJobResponse(BaseModel):
     material_id: int
-    version_id: int
     job_id: str | None
     parse_status: ParseStatus
 
 
 class MaterialParseResponse(BaseModel):
     material_id: int
-    version_id: int
-    version_number: int
     original_filename: str
     normalized_format: MaterialFormat
     parse_status: ParseStatus

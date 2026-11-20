@@ -39,8 +39,6 @@ def context(
         headers=headers,
         json={
             "name": f"{username} project",
-            "goal": "verify evidence acceptance",
-            "current_level": "beginner",
         },
     )
     assert project_response.status_code == 201

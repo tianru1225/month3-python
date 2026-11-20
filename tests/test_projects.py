@@ -36,14 +36,9 @@ def test_create_project_uses_current_user_and_defaults(client) -> None:
 
     body = _create_project(client, headers, "  FastAPI 项目  ")
 
+    assert set(body) == {"id", "name", "status", "created_at", "updated_at"}
     assert body["name"] == "FastAPI 项目"
-    assert body["goal"] == "从上传资料开始完成系统学习"
-    assert body["current_level"] == "beginner"
-    assert body["daily_minutes"] == 60
-    assert body["weekly_days"] == 7
     assert body["status"] == "ACTIVE"
-    assert body["deadline"] is None
-    assert body["expected_outcome"] is None
     assert "user_id" not in body
     assert "password_hash" not in body
 
@@ -71,13 +66,9 @@ def test_create_project_does_not_accept_owner_or_status(client) -> None:
         },
     )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["status"] == "ACTIVE"
-    assert "user_id" not in body
-    listing = client.get("/projects", headers=headers)
-    assert listing.status_code == 200
-    assert [item["id"] for item in listing.json()] == [body["id"]]
+    assert response.status_code == 422
+    assert {item["loc"][-1] for item in response.json()["detail"]} == {"user_id", "status"}
+    assert client.get("/projects", headers=headers).json() == []
 
 
 def test_list_projects_isolated_by_user(client) -> None:
@@ -159,19 +150,6 @@ def test_project_routes_require_bearer(client) -> None:
         ({"name": " \t\n "}, "name"),
         ({"name": None}, "name"),
         ({"name": "x" * 121}, "name"),
-        ({"name": "校验项目", "goal": ""}, "goal"),
-        ({"name": "校验项目", "goal": "   "}, "goal"),
-        ({"name": "校验项目", "goal": None}, "goal"),
-        ({"name": "校验项目", "current_level": ""}, "current_level"),
-        ({"name": "校验项目", "current_level": "   "}, "current_level"),
-        ({"name": "校验项目", "current_level": None}, "current_level"),
-        ({"name": "校验项目", "daily_minutes": 0}, "daily_minutes"),
-        ({"name": "校验项目", "daily_minutes": 1441}, "daily_minutes"),
-        ({"name": "校验项目", "daily_minutes": None}, "daily_minutes"),
-        ({"name": "校验项目", "weekly_days": 0}, "weekly_days"),
-        ({"name": "校验项目", "weekly_days": 8}, "weekly_days"),
-        ({"name": "校验项目", "weekly_days": None}, "weekly_days"),
-        ({"name": "校验项目", "expected_outcome": "   "}, "expected_outcome"),
     ],
 )
 def test_project_validation(client, payload: dict, field: str) -> None:
@@ -191,33 +169,27 @@ def test_project_validation(client, payload: dict, field: str) -> None:
     assert listing.json() == []
 
 
-@pytest.mark.parametrize(
-    ("daily_minutes", "weekly_days"),
-    [(1, 1), (1440, 7)],
-)
-def test_project_accepts_valid_boundaries(
-    client, daily_minutes: int, weekly_days: int
-) -> None:
-    headers = _register_and_login(
-        client,
-        "project-valid-bounds",
-        "project-valid-bounds-password",
-    )
-    response = client.post(
-        "/projects",
-        headers=headers,
-        json={
-            "name": "学" * 120,
-            "daily_minutes": daily_minutes,
-            "weekly_days": weekly_days,
-        },
-    )
-
-    assert response.status_code == 201
-    body = response.json()
+def test_project_accepts_maximum_name_length(client) -> None:
+    headers = _register_and_login(client, "project-max-name", "project-max-name-password")
+    body = _create_project(client, headers, "学" * 120)
     assert len(body["name"]) == 120
-    assert body["daily_minutes"] == daily_minutes
-    assert body["weekly_days"] == weekly_days
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["goal", "current_level", "deadline", "daily_minutes", "weekly_days", "expected_outcome"],
+)
+def test_project_rejects_retired_fields(client, field: str) -> None:
+    headers = _register_and_login(client, "project-retired", "project-retired-password")
+    response = client.post(
+        "/projects", headers=headers, json={"name": "Name only", field: "legacy"},
+    )
+    assert response.status_code == 422
+    assert any(
+        item["loc"] == ["body", field] and item["type"] == "extra_forbidden"
+        for item in response.json()["detail"]
+    )
+    assert client.get("/projects", headers=headers).json() == []
 
 
 def test_project_list_empty_for_new_user(client) -> None:
@@ -238,9 +210,5 @@ def test_project_openapi_describes_name_only_request(client) -> None:
     schema = response.json()["components"]["schemas"]["ProjectCreate"]
 
     assert schema["required"] == ["name"]
-    properties = schema["properties"]
-    assert properties["goal"]["default"] == "从上传资料开始完成系统学习"
-    assert properties["current_level"]["default"] == "beginner"
-    assert properties["daily_minutes"]["default"] == 60
-    assert properties["daily_minutes"]["minimum"] == 1
-    assert properties["weekly_days"]["default"] == 7
+    assert set(schema["properties"]) == {"name"}
+    assert schema["additionalProperties"] is False

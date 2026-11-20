@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -10,7 +9,6 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
@@ -34,6 +32,14 @@ def utc_now() -> datetime:
 
 class Material(Base):
     __tablename__ = "materials"
+    __table_args__ = (
+        CheckConstraint("size_bytes >= 0", name="ck_materials_size_bytes"),
+        CheckConstraint("normalized_format = 'markdown'", name="ck_materials_format"),
+        CheckConstraint(
+            "parse_status IN ('UPLOADED','QUEUED','PARSING','READY','FAILED')",
+            name="ck_materials_parse_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(
@@ -43,7 +49,6 @@ class Material(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     deletion_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
@@ -59,40 +64,6 @@ class Material(Base):
         nullable=False,
     )
 
-
-class MaterialVersion(Base):
-    __tablename__ = "material_versions"
-    __table_args__ = (
-        UniqueConstraint(
-            "material_id",
-            "version_number",
-            name="uq_material_versions_material_version",
-        ),
-        CheckConstraint(
-            "version_number >= 1",
-            name="ck_material_versions_version_number",
-        ),
-        CheckConstraint(
-            "size_bytes >= 0",
-            name="ck_material_versions_size_bytes",
-        ),
-        CheckConstraint(
-            "normalized_format = 'markdown'",
-            name="ck_material_versions_format",
-        ),
-        CheckConstraint(
-            "parse_status IN ('UPLOADED','QUEUED','PARSING','READY','FAILED')",
-            name="ck_material_versions_parse_status",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    material_id: Mapped[int] = mapped_column(
-        ForeignKey("materials.id"),
-        nullable=False,
-        index=True,
-    )
-    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_format: Mapped[str] = mapped_column(String(20), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(120), nullable=False)

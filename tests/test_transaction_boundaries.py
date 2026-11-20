@@ -20,8 +20,6 @@ def context(
     project = LearningProject(
         user_id=user.id,
         name=f"{suffix}-project",
-        goal="verify transaction boundaries",
-        current_level="beginner",
     )
     db.add(project)
     db.flush()
@@ -68,8 +66,6 @@ def test_create_plan_rolls_back_if_version_insert_fails(
     project = LearningProject(
         user_id=user.id,
         name="day140-plan-rollback-project",
-        goal="transaction rollback",
-        current_level="beginner",
     )
     db_session.add(project)
     db_session.commit()

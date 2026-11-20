@@ -1,6 +1,6 @@
 import pytest
 
-from app.models.material import MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.core.material_state import (
     InvalidMaterialStateTransition,
     ensure_transition_allowed,
@@ -61,7 +61,7 @@ def test_unknown_target_status_is_rejected() -> None:
 
 
 def test_transition_applies_value_without_database_commit() -> None:
-    version = MaterialVersion(parse_status=ParseStatus.UPLOADED.value)
+    version = Material(parse_status=ParseStatus.UPLOADED.value)
 
     transition_parse_status(version, ParseStatus.QUEUED)
 
@@ -69,7 +69,7 @@ def test_transition_applies_value_without_database_commit() -> None:
 
 
 def test_transition_does_not_apply_invalid_target() -> None:
-    version = MaterialVersion(parse_status=ParseStatus.READY.value)
+    version = Material(parse_status=ParseStatus.READY.value)
 
     with pytest.raises(InvalidMaterialStateTransition):
         transition_parse_status(version, ParseStatus.QUEUED)

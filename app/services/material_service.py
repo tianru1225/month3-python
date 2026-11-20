@@ -11,15 +11,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.material_queue import material_queue
-from app.models.material import MaterialFormat, MaterialVersion, ParseStatus
+from app.models.material import MaterialFormat, Material, ParseStatus
 from app.parsers.markdown_parser import MarkdownParseError, parse_markdown
 from app.repositories.material_repository import create_material_upload
-from app.repositories.material_repository import get_material_version_for_user
+from app.repositories.material_repository import get_owned_material
 from app.repositories.material_repository import lock_material
-from app.repositories.material_repository import mark_version_failed
-from app.repositories.material_repository import mark_version_parsing
-from app.repositories.material_repository import mark_version_queued
-from app.repositories.material_repository import mark_version_ready
+from app.repositories.material_repository import mark_material_failed
+from app.repositories.material_repository import mark_material_parsing
+from app.repositories.material_repository import mark_material_queued
+from app.repositories.material_repository import mark_material_ready
 from app.repositories.material_repository import restore_parse_queue_state
 from app.schemas.material import MaterialParseJobResponse
 from app.schemas.material import MaterialParseResponse
@@ -142,7 +142,7 @@ def upload_material_or_raise(
         ) from exc
 
     try:
-        material, version = create_material_upload(
+        material = create_material_upload(
             db,
             user_id=user_id,
             name=normalized_name,
@@ -165,71 +165,63 @@ def upload_material_or_raise(
 
     return MaterialUploadResponse(
         material_id=material.id,
-        version_id=version.id,
         name=material.name,
         description=material.description,
-        enabled=material.enabled,
-        version_number=version.version_number,
-        original_filename=version.original_filename,
-        normalized_format=MaterialFormat(version.normalized_format),
-        mime_type=version.mime_type,
-        size_bytes=version.size_bytes,
-        content_hash=version.content_hash,
-        parse_status=ParseStatus(version.parse_status),
-        uploaded_at=version.uploaded_at,
+        original_filename=material.original_filename,
+        normalized_format=MaterialFormat(material.normalized_format),
+        mime_type=material.mime_type,
+        size_bytes=material.size_bytes,
+        content_hash=material.content_hash,
+        parse_status=ParseStatus(material.parse_status),
+        uploaded_at=material.uploaded_at,
     )
 
 
-def _get_owned_version(
+def _get_owned_material(
     db: Session,
     *,
     user_id: int,
     material_id: int,
-    version_id: int,
     lock: bool = False,
-) -> MaterialVersion:
-    version = get_material_version_for_user(
+) -> Material:
+    material = get_owned_material(
         db,
         material_id=material_id,
-        version_id=version_id,
         user_id=user_id,
         lock=lock,
     )
-    if version is None:
+    if material is None:
         raise _error(
             status.HTTP_404_NOT_FOUND,
-            "MATERIAL_VERSION_NOT_FOUND",
-            "material version not found",
+            "MATERIAL_NOT_FOUND",
+            "material not found",
         )
-    return version
+    return material
 
 
-def _parse_job_response(version: MaterialVersion) -> MaterialParseJobResponse:
+def _parse_job_response(material: Material) -> MaterialParseJobResponse:
     return MaterialParseJobResponse(
-        material_id=version.material_id,
-        version_id=version.id,
-        job_id=version.parse_job_id,
-        parse_status=ParseStatus(version.parse_status),
+        material_id=material.id,
+        job_id=material.parse_job_id,
+        parse_status=ParseStatus(material.parse_status),
     )
 
 
-def _parse_response(version: MaterialVersion) -> MaterialParseResponse:
+def _parse_response(material: Material) -> MaterialParseResponse:
     return MaterialParseResponse(
-        material_id=version.material_id,
-        version_id=version.id,
-        version_number=version.version_number,
-        original_filename=version.original_filename,
-        normalized_format=MaterialFormat(version.normalized_format),
-        parse_status=ParseStatus(version.parse_status),
-        parse_job_id=version.parse_job_id,
-        parser_name=version.parser_name,
-        parser_version=version.parser_version,
-        content_summary=version.content_summary,
-        parsed_content_location=version.parsed_content_location,
-        source_metadata=version.source_metadata,
-        parse_error_code=version.parse_error_code,
-        parse_error_message=version.parse_error_message,
-        processed_at=version.processed_at,
+        material_id=material.id,
+        original_filename=material.original_filename,
+        normalized_format=MaterialFormat(material.normalized_format),
+        parse_status=ParseStatus(material.parse_status),
+        parse_job_id=material.parse_job_id,
+        parser_name=material.parser_name,
+        parser_version=material.parser_version,
+        content_summary=material.content_summary,
+        parsed_content_location=material.parsed_content_location,
+        source_metadata=material.source_metadata,
+        parse_error_code=material.parse_error_code,
+        parse_error_message=material.parse_error_message,
+        processed_at=material.processed_at,
     )
 
 
@@ -238,47 +230,45 @@ def enqueue_material_parse_or_raise(
     *,
     user_id: int,
     material_id: int,
-    version_id: int,
     queue: Queue = material_queue,
 ) -> tuple[MaterialParseJobResponse, bool]:
-    version = _get_owned_version(
+    material = _get_owned_material(
         db,
         user_id=user_id,
         material_id=material_id,
-        version_id=version_id,
         lock=True,
     )
-    if version.parse_status in {
+    if material.parse_status in {
         ParseStatus.QUEUED.value,
         ParseStatus.PARSING.value,
         ParseStatus.READY.value,
     }:
-        return _parse_job_response(version), False
+        return _parse_job_response(material), False
 
     previous = (
-        version.parse_status,
-        version.parse_job_id,
-        version.parser_name,
-        version.parser_version,
-        version.parse_error_code,
-        version.parse_error_message,
-        version.processed_at,
+        material.parse_status,
+        material.parse_job_id,
+        material.parser_name,
+        material.parser_version,
+        material.parse_error_code,
+        material.parse_error_message,
+        material.processed_at,
     )
     job_id = uuid4().hex
-    mark_version_queued(db, version, job_id=job_id)
+    mark_material_queued(db, material, job_id=job_id)
     try:
-        from app.tasks.material_jobs import parse_material_version_job
+        from app.tasks.material_jobs import parse_material_job
 
         queue.enqueue(
-            parse_material_version_job,
-            version.id,
+            parse_material_job,
+            material.id,
             job_id,
             job_id=job_id,
         )
     except RedisError as exc:
         restore_parse_queue_state(
             db,
-            version,
+            material,
             expected_job_id=job_id,
             parse_status=previous[0],
             parse_job_id=previous[1],
@@ -293,7 +283,7 @@ def enqueue_material_parse_or_raise(
             "MATERIAL_QUEUE_UNAVAILABLE",
             "material parse queue is unavailable",
         ) from exc
-    return _parse_job_response(version), True
+    return _parse_job_response(material), True
 
 
 def get_material_parse_status_or_raise(
@@ -301,29 +291,27 @@ def get_material_parse_status_or_raise(
     *,
     user_id: int,
     material_id: int,
-    version_id: int,
 ) -> MaterialParseResponse:
-    version = _get_owned_version(
+    material = _get_owned_material(
         db,
         user_id=user_id,
         material_id=material_id,
-        version_id=version_id,
     )
-    return _parse_response(version)
+    return _parse_response(material)
 
 
-def process_material_version(db: Session, version: MaterialVersion) -> None:
-    material = lock_material(db, material_id=version.material_id)
-    if material is None or material.deletion_started_at is not None:
+def process_material(db: Session, material: Material) -> None:
+    locked = lock_material(db, material_id=material.id)
+    if locked is None or locked.deletion_started_at is not None:
         raise _error(409, "MATERIAL_DELETING", "material is being deleted")
-    db.refresh(version)
-    mark_version_parsing(db, version)
+    db.refresh(material)
+    mark_material_parsing(db, material)
     parsed_path = (
-        MATERIAL_STORAGE_DIR / "parsed" / str(version.material_id) / f"{version.id}.md"
+        MATERIAL_STORAGE_DIR / "parsed" / str(material.id) / "content.md"
     )
     sources_path = parsed_path.with_suffix(".sources.json")
     try:
-        source_path = MATERIAL_STORAGE_DIR / version.storage_object_key
+        source_path = MATERIAL_STORAGE_DIR / material.storage_object_key
         if not source_path.is_file():
             raise MarkdownParseError(
                 "MATERIAL_SOURCE_NOT_FOUND",
@@ -336,10 +324,10 @@ def process_material_version(db: Session, version: MaterialVersion) -> None:
             "kind": "markdown",
             "line_count": document.line_count,
             "headings": document.headings,
-            "sources_path": (f"parsed/{version.material_id}/{version.id}.sources.json"),
+            "sources_path": (f"parsed/{material.id}/content.sources.json"),
         }
         source_map = {
-            "material_version_id": version.id,
+            "material_id": material.id,
             "normalized_format": MaterialFormat.MARKDOWN.value,
             "parser_name": _PARSER_NAME,
             "parser_version": _PARSER_VERSION,
@@ -349,21 +337,21 @@ def process_material_version(db: Session, version: MaterialVersion) -> None:
             json.dumps(source_map, ensure_ascii=False),
             encoding="utf-8",
         )
-        mark_version_ready(
+        mark_material_ready(
             db,
-            version,
+            material,
             parser_name=_PARSER_NAME,
             parser_version=_PARSER_VERSION,
             content_summary=_content_summary(document.text),
-            parsed_content_location=(f"parsed/{version.material_id}/{version.id}.md"),
+            parsed_content_location=(f"parsed/{material.id}/content.md"),
             source_metadata=source_metadata,
         )
     except MarkdownParseError as exc:
         parsed_path.unlink(missing_ok=True)
         sources_path.unlink(missing_ok=True)
-        mark_version_failed(
+        mark_material_failed(
             db,
-            version,
+            material,
             parser_name=_PARSER_NAME,
             parser_version=_PARSER_VERSION,
             error_code=exc.code,
@@ -372,9 +360,9 @@ def process_material_version(db: Session, version: MaterialVersion) -> None:
     except Exception as exc:
         parsed_path.unlink(missing_ok=True)
         sources_path.unlink(missing_ok=True)
-        mark_version_failed(
+        mark_material_failed(
             db,
-            version,
+            material,
             parser_name=_PARSER_NAME,
             parser_version=_PARSER_VERSION,
             error_code="MATERIAL_PARSE_ERROR",

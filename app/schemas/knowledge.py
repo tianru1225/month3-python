@@ -18,7 +18,9 @@ class KnowledgeNodeCreate(BaseModel):
 
 
 class KnowledgeNodeSourceCreate(BaseModel):
-    material_version_id: int = Field(gt=0)
+    model_config = ConfigDict(extra="forbid")
+
+    material_id: int = Field(gt=0)
     block_index: int = Field(ge=0)
     line_start: int = Field(ge=1)
     line_end: int = Field(ge=1)
@@ -29,7 +31,7 @@ class KnowledgeNodeSourceCreate(BaseModel):
 class KnowledgeNodeSourceResponse(BaseModel):
     id: int
     node_id: int
-    material_version_id: int
+    material_id: int
     block_index: int
     line_start: int
     line_end: int

@@ -19,8 +19,6 @@ def _user_and_project(db_session, username: str) -> tuple[User, LearningProject]
     project = LearningProject(
         user_id=user.id,
         name=f"{username} project",
-        goal="build a traceable study plan",
-        current_level="beginner",
     )
     db_session.add(project)
     db_session.commit()

@@ -3,7 +3,7 @@ from contextlib import nullcontext
 import pytest
 from redis.exceptions import ConnectionError
 
-from app.models.material import MaterialVersion, ParseStatus
+from app.models.material import Material, ParseStatus
 from app.services import material_service
 from app.tasks import material_jobs
 
@@ -19,7 +19,7 @@ class FakeQueue:
         self.calls.append(
             {
                 "function": function,
-                "version_id": args[0],
+                "material_id": args[0],
                 "job_id": args[1],
                 "rq_job_id": options["job_id"],
             }
@@ -64,7 +64,7 @@ def _upload(client, headers: dict[str, str]) -> dict:
 
 
 def _path(body: dict) -> str:
-    return f"/materials/{body['material_id']}/versions/{body['version_id']}/parse"
+    return f"/materials/{body['material_id']}/parse"
 
 
 def test_first_enqueue_is_202_and_duplicate_is_idempotent(
@@ -87,7 +87,7 @@ def test_first_enqueue_is_202_and_duplicate_is_idempotent(
     assert len(queue.calls) == 1
     assert queue.calls[0]["job_id"] == queue.calls[0]["rq_job_id"]
 
-    version = db_session.get(MaterialVersion, body["version_id"])
+    version = db_session.get(Material, body["material_id"])
     assert version is not None
     assert version.parse_job_id == first.json()["job_id"]
 
@@ -108,7 +108,7 @@ def test_get_status_uses_postgresql_and_requires_owner(client, monkeypatch) -> N
     assert status_response.json()["parse_status"] == ParseStatus.QUEUED.value
     assert status_response.json()["parse_job_id"] == queued.json()["job_id"]
     assert forbidden.status_code == 404
-    assert forbidden.json()["detail"]["code"] == "MATERIAL_VERSION_NOT_FOUND"
+    assert forbidden.json()["detail"]["code"] == "MATERIAL_NOT_FOUND"
 
 
 def test_queue_failure_restores_previous_state(
@@ -125,7 +125,7 @@ def test_queue_failure_restores_previous_state(
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "MATERIAL_QUEUE_UNAVAILABLE"
-    version = db_session.get(MaterialVersion, body["version_id"])
+    version = db_session.get(Material, body["material_id"])
     assert version is not None
     assert version.parse_status == ParseStatus.UPLOADED.value
     assert version.parse_job_id is None
@@ -138,7 +138,7 @@ def test_failed_version_can_enqueue_new_job(
 ) -> None:
     headers = _register_and_login(client, "job-failed-retry")
     body = _upload(client, headers)
-    version = db_session.get(MaterialVersion, body["version_id"])
+    version = db_session.get(Material, body["material_id"])
     assert version is not None
     version.parse_status = ParseStatus.FAILED.value
     version.parse_job_id = "old-job"
@@ -162,7 +162,7 @@ def test_failed_version_can_enqueue_new_job(
 def test_ready_version_is_not_requeued(client, db_session, monkeypatch) -> None:
     headers = _register_and_login(client, "job-ready-idempotent")
     body = _upload(client, headers)
-    version = db_session.get(MaterialVersion, body["version_id"])
+    version = db_session.get(Material, body["material_id"])
     assert version is not None
     version.parse_status = ParseStatus.READY.value
     version.parse_job_id = "ready-job"
@@ -184,7 +184,7 @@ def test_stale_worker_job_is_ignored(
 ) -> None:
     headers = _register_and_login(client, "job-stale-worker")
     body = _upload(client, headers)
-    version = db_session.get(MaterialVersion, body["version_id"])
+    version = db_session.get(Material, body["material_id"])
     assert version is not None
     version.parse_status = ParseStatus.QUEUED.value
     version.parse_job_id = "current-job"
@@ -195,7 +195,7 @@ def test_stale_worker_job_is_ignored(
         lambda: nullcontext(db_session),
     )
 
-    result = material_jobs.parse_material_version_job(
+    result = material_jobs.parse_material_job(
         version.id,
         "stale-job",
     )
@@ -207,8 +207,8 @@ def test_stale_worker_job_is_ignored(
 
 def test_parse_routes_require_bearer(client) -> None:
     responses = [
-        client.post("/materials/1/versions/1/parse"),
-        client.get("/materials/1/versions/1/parse"),
+        client.post("/materials/1/parse"),
+        client.get("/materials/1/parse"),
     ]
     assert [response.status_code for response in responses] == [401, 401]
     assert [response.json()["detail"]["code"] for response in responses] == [

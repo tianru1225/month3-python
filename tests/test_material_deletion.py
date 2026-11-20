@@ -7,11 +7,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models.knowledge import KnowledgeNodeSource
-from app.models.material import Material, MaterialVersion
+from app.models.material import Material
 from app.models.project_material import ProjectMaterialBinding
 from app.models.user import User
 from app.repositories.material_repository import (
-    mark_version_failed, mark_version_parsing, mark_version_queued,
+    mark_material_failed, mark_material_parsing, mark_material_queued,
     restore_parse_queue_state,
 )
 from app.schemas.learning_plan import PlanCreate
@@ -51,10 +51,10 @@ def project(client, headers):
 
 
 def parsed_version(db, item):
-    version = db.get(MaterialVersion, item["version_id"])
+    version = db.get(Material, item["material_id"])
     assert version is not None
-    mark_version_queued(db, version, job_id="parse-for-deletion-test")
-    material_service.process_material_version(db, version)
+    mark_material_queued(db, version, job_id="parse-for-deletion-test")
+    material_service.process_material(db, version)
     assert version.parse_status == "READY"
     return version
 
@@ -89,11 +89,10 @@ def test_management_is_owner_scoped_and_removes_files_with_safe_paths(
     assert response.status_code == 204 and response.content == b""
     assert not any(file.exists() for file in (original, parsed, sources))
     assert db_session.get(Material, item["material_id"]) is None
-    assert db_session.get(MaterialVersion, item["version_id"]) is None
     assert client.delete(path, headers=owner).status_code == 404
     assert db_session.get(Material, foreign["material_id"]) is not None
 
-    invalid = db_session.get(MaterialVersion, second["version_id"])
+    invalid = db_session.get(Material, second["material_id"])
     invalid.storage_object_key = "../do-not-delete.md"
     db_session.commit()
     sentinel = storage.parent / "do-not-delete.md"
@@ -133,7 +132,7 @@ def test_bindings_and_learning_history_prevent_permanent_deletion(
     added = client.post(
         f"/projects/{projects[1]}/knowledge-nodes/{node.json()['id']}/sources",
         headers=headers, json={
-            "material_version_id": version.id, "block_index": 0,
+            "material_id": version.id, "block_index": 0,
             "line_start": source["line_start"], "line_end": source["line_end"],
             "section_path": source["section_path"],
         },
@@ -169,15 +168,15 @@ def test_queue_worker_and_late_queue_failure_cannot_race_cleanup(
 ):
     headers = login(client, "cleanup-jobs")
     item = upload(client, headers)
-    version = db_session.get(MaterialVersion, item["version_id"])
-    parse_path = f"/materials/{item['material_id']}/versions/{version.id}/parse"
+    version = db_session.get(Material, item["material_id"])
+    parse_path = f"/materials/{item['material_id']}/parse"
     path = f"/materials/{item['material_id']}"
     monkeypatch.setattr(material_service.material_queue, "enqueue", lambda *args, **kwargs: None)
     queued = client.post(parse_path, headers=headers)
     assert queued.status_code == 202
     old_job = queued.json()["job_id"]
     assert client.delete(path, headers=headers).status_code == 409
-    mark_version_parsing(db_session, version)
+    mark_material_parsing(db_session, version)
     restore_parse_queue_state(
         db_session, version, expected_job_id=old_job,
         parse_status="UPLOADED", parse_job_id=None, parser_name=None,
@@ -187,7 +186,7 @@ def test_queue_worker_and_late_queue_failure_cannot_race_cleanup(
     db_session.refresh(version)
     assert version.parse_status == "PARSING"
     assert client.delete(path, headers=headers).status_code == 409
-    mark_version_failed(
+    mark_material_failed(
         db_session, version, parser_name="test", parser_version="1",
         error_code="TEST_FAILURE", error_message="retry test",
     )
@@ -195,11 +194,11 @@ def test_queue_worker_and_late_queue_failure_cannot_race_cleanup(
     assert retried.status_code == 202
     new_job = retried.json()["job_id"]
     monkeypatch.setattr(material_jobs, "SessionLocal", lambda: nullcontext(db_session))
-    assert material_jobs.parse_material_version_job(version.id, old_job) == "ignored:stale_job"
-    version_id = version.id
-    assert material_jobs.parse_material_version_job(version_id, new_job) == "READY"
+    assert material_jobs.parse_material_job(version.id, old_job) == "ignored:stale_job"
+    material_id = version.id
+    assert material_jobs.parse_material_job(material_id, new_job) == "READY"
     assert client.delete(path, headers=headers).status_code == 204
-    assert material_jobs.parse_material_version_job(version_id, new_job) == "ignored:not_found"
+    assert material_jobs.parse_material_job(material_id, new_job) == "ignored:not_found"
     assert not (storage / "parsed" / str(item["material_id"])).exists()
 
 
@@ -233,7 +232,7 @@ def test_partial_cleanup_stays_unusable_and_retry_finishes(
     listed = client.get("/materials", headers=headers).json()["items"]
     assert listed[0]["deletion_pending"] is True
     assert client.post(binding, headers=headers).status_code == 404
-    parse_path = f"/materials/{item['material_id']}/versions/{version.id}/parse"
+    parse_path = f"/materials/{item['material_id']}/parse"
     assert client.post(parse_path, headers=headers).status_code == 404
     assert client.get(parse_path, headers=headers).status_code == 404
     user = db_session.scalar(select(User).where(User.username == "cleanup-retry"))
@@ -245,6 +244,6 @@ def test_partial_cleanup_stays_unusable_and_retry_finishes(
     assert caught.value.status_code == 409
     assert client.delete(f"/materials/{item['material_id']}", headers=headers).status_code == 204
     assert not parsed.exists() and not sources.exists()
-    assert db_session.get(MaterialVersion, item["version_id"]) is None
+    assert db_session.get(Material, item["material_id"]) is None
     assert list(db_session.scalars(select(ProjectMaterialBinding))) == []
     assert client.get("/materials", headers=headers).json()["items"] == []

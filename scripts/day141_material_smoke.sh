@@ -78,15 +78,14 @@ rm -f -- "$TMP/token.json" "$TMP/login.json"
 
 request 201 POST /projects "$TMP/project.json" \
     -H "@$TMP/auth.header" -H 'Content-Type: application/json' \
-    --data-binary '{"name":"Python basics from real notes","goal":"Learn Python syntax, functions and collections using the uploaded notes","current_level":"beginner","daily_minutes":60,"weekly_days":5,"expected_outcome":"Explain the examples and complete small exercises"}'
+    --data-binary '{"name":"Python basics from real notes"}'
 PROJECT_ID="$(json_field "$TMP/project.json" id)"
 request 201 POST /materials "$TMP/upload.json" \
     -H "@$TMP/auth.header" --form-string 'name=Python learning notes' \
     -F "file=@$SOURCE_FILE;filename=python-notes.md;type=text/markdown"
 MATERIAL_ID="$(json_field "$TMP/upload.json" material_id)"
-VERSION_ID="$(json_field "$TMP/upload.json" version_id)"
 CONTENT_HASH="$(json_field "$TMP/upload.json" content_hash)"
-export USER_ID PROJECT_ID MATERIAL_ID VERSION_ID CONTENT_HASH
+export USER_ID PROJECT_ID MATERIAL_ID CONTENT_HASH
 
 python - "$SOURCE_FILE" "$TMP/upload.json" "$OUT/summary.json" <<'PY'
 import hashlib
@@ -101,7 +100,7 @@ assert upload["parse_status"] == "UPLOADED"
 assert upload["size_bytes"] == len(content)
 assert upload["content_hash"] == hashlib.sha256(content).hexdigest()
 summary = {key.lower(): int(os.environ[key]) for key in (
-    "USER_ID", "PROJECT_ID", "MATERIAL_ID", "VERSION_ID"
+    "USER_ID", "PROJECT_ID", "MATERIAL_ID"
 )}
 summary.update(
     username=os.environ["USERNAME"],
@@ -114,7 +113,7 @@ PY
 echo "Run summary: $OUT/summary.json"
 
 BIND_ROUTE="/projects/$PROJECT_ID/materials/$MATERIAL_ID"
-PARSE_ROUTE="/materials/$MATERIAL_ID/versions/$VERSION_ID/parse"
+PARSE_ROUTE="/materials/$MATERIAL_ID/parse"
 request 201 POST "$BIND_ROUTE" "$TMP/binding.json" -H "@$TMP/auth.header"
 request 200 POST "$BIND_ROUTE" "$TMP/binding-again.json" -H "@$TMP/auth.header"
 test "$(json_field "$TMP/binding.json" id)" = "$(json_field "$TMP/binding-again.json" id)"
@@ -136,7 +135,7 @@ PY
 check_gate() {
     docker compose exec -T \
         -e USER_ID="$USER_ID" -e PROJECT_ID="$PROJECT_ID" \
-        -e VERSION_ID="$VERSION_ID" -e CONTENT_HASH="$CONTENT_HASH" \
+        -e MATERIAL_ID="$MATERIAL_ID" -e CONTENT_HASH="$CONTENT_HASH" \
         -e EXPECT_READY="$1" api python - <<'PY'
 import hashlib
 import json
@@ -151,7 +150,7 @@ from app.services.material_service import MATERIAL_STORAGE_DIR
 ready = os.environ["EXPECT_READY"] == "yes"
 with SessionLocal() as db:
     try:
-        versions = require_ready_materials_or_raise(
+        materials = require_ready_materials_or_raise(
             db,
             project_id=int(os.environ["PROJECT_ID"]),
             user_id=int(os.environ["USER_ID"]),
@@ -164,16 +163,16 @@ with SessionLocal() as db:
         print("gate_before_parse: rejected as expected")
     else:
         assert ready, "UPLOADED material must not be usable"
-        assert [v.id for v in versions] == [int(os.environ["VERSION_ID"])]
-        version = versions[0]
-        original = (MATERIAL_STORAGE_DIR / version.storage_object_key).read_bytes()
+        assert [v.id for v in materials] == [int(os.environ["MATERIAL_ID"])]
+        material = materials[0]
+        original = (MATERIAL_STORAGE_DIR / material.storage_object_key).read_bytes()
         assert hashlib.sha256(original).hexdigest() == os.environ["CONTENT_HASH"]
-        assert version.content_hash == os.environ["CONTENT_HASH"]
-        parsed_path = MATERIAL_STORAGE_DIR / version.parsed_content_location
+        assert material.content_hash == os.environ["CONTENT_HASH"]
+        parsed_path = MATERIAL_STORAGE_DIR / material.parsed_content_location
         text = parsed_path.read_bytes().decode("utf-8")
         assert text == original.decode("utf-8")
         sources = json.loads(parsed_path.with_suffix(".sources.json").read_text(encoding="utf-8"))
-        assert sources["material_version_id"] == version.id
+        assert sources["material_id"] == material.id
         assert sources["normalized_format"] == "markdown"
         blocks = sources["blocks"]
         assert blocks, "real notes should contain source blocks"
@@ -185,8 +184,8 @@ with SessionLocal() as db:
             assert 1 <= block["line_start"] <= block["line_end"] <= len(lines)
             assert block["source"]["line_start"] == block["line_start"]
             assert block["source"]["line_end"] == block["line_end"]
-        assert version.source_metadata["line_count"] == len(lines)
-        assert version.source_metadata["headings"]
+        assert material.source_metadata["line_count"] == len(lines)
+        assert material.source_metadata["headings"]
         print(f"gate_after_parse: passed; lines={len(lines)}; blocks={len(blocks)}")
 PY
 }

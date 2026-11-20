@@ -10,12 +10,6 @@ export type TokenResponse = { access_token: string; token_type: string };
 export type Project = {
   id: number;
   name: string;
-  goal: string;
-  current_level: string;
-  deadline: string | null;
-  daily_minutes: number;
-  weekly_days: number;
-  expected_outcome: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -23,11 +17,8 @@ export type Project = {
 
 export type MaterialUpload = {
   material_id: number;
-  version_id: number;
   name: string;
   description: string | null;
-  enabled: boolean;
-  version_number: number;
   original_filename: string;
   normalized_format: string;
   mime_type: string;
@@ -47,8 +38,6 @@ export type MaterialBinding = {
 
 export type MaterialParse = {
   material_id: number;
-  version_id: number;
-  version_number: number;
   original_filename: string;
   normalized_format: string;
   parse_status: string;

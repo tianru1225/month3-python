@@ -101,8 +101,8 @@ class KnowledgeNodeSource(Base):
         ),
         Index("ix_knowledge_node_sources_node_id", "node_id"),
         Index(
-            "ix_knowledge_node_sources_material_version_id",
-            "material_version_id",
+            "ix_knowledge_node_sources_material_id",
+            "material_id",
         ),
     )
 
@@ -110,8 +110,8 @@ class KnowledgeNodeSource(Base):
     node_id: Mapped[int] = mapped_column(
         ForeignKey("knowledge_nodes.id"), nullable=False
     )
-    material_version_id: Mapped[int] = mapped_column(
-        ForeignKey("material_versions.id"), nullable=False
+    material_id: Mapped[int] = mapped_column(
+        ForeignKey("materials.id"), nullable=False
     )
     block_index: Mapped[int] = mapped_column(Integer, nullable=False)
     line_start: Mapped[int] = mapped_column(Integer, nullable=False)

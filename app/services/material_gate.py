@@ -4,9 +4,9 @@ from pathlib import Path
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.material import MaterialFormat, MaterialVersion
+from app.models.material import MaterialFormat, Material
 from app.repositories.project_material_repository import (
-    list_ready_versions_for_project,
+    list_ready_materials_for_project,
 )
 
 
@@ -21,14 +21,14 @@ def _ready_required_error() -> HTTPException:
 
 
 def _has_valid_output(
-    version: MaterialVersion,
+    material: Material,
     *,
     storage_dir: Path,
 ) -> bool:
-    if not version.parsed_content_location or version.source_metadata is None:
+    if not material.parsed_content_location or material.source_metadata is None:
         return False
 
-    parsed_path = storage_dir / version.parsed_content_location
+    parsed_path = storage_dir / material.parsed_content_location
     sources_path = parsed_path.with_suffix(".sources.json")
     try:
         parsed_text = parsed_path.read_text(encoding="utf-8")
@@ -40,7 +40,7 @@ def _has_valid_output(
         return False
 
     return (
-        source_map.get("material_version_id") == version.id
+        source_map.get("material_id") == material.id
         and source_map.get("normalized_format") == MaterialFormat.MARKDOWN.value
         and isinstance(source_map.get("blocks"), list)
     )
@@ -52,17 +52,17 @@ def require_ready_materials_or_raise(
     project_id: int,
     user_id: int,
     storage_dir: Path,
-) -> list[MaterialVersion]:
-    ready_versions = list_ready_versions_for_project(
+) -> list[Material]:
+    ready_materials = list_ready_materials_for_project(
         db,
         project_id=project_id,
         user_id=user_id,
     )
-    usable_versions = [
-        version
-        for version in ready_versions
-        if _has_valid_output(version, storage_dir=storage_dir)
+    usable_materials = [
+        material
+        for material in ready_materials
+        if _has_valid_output(material, storage_dir=storage_dir)
     ]
-    if not usable_versions:
+    if not usable_materials:
         raise _ready_required_error()
-    return usable_versions
+    return usable_materials

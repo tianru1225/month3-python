@@ -14,7 +14,7 @@ from app.repositories.knowledge_repository import delete_edge
 from app.repositories.knowledge_repository import get_edge
 from app.repositories.knowledge_repository import get_node
 from app.repositories.knowledge_repository import get_owned_project
-from app.repositories.knowledge_repository import get_ready_version_for_project
+from app.repositories.knowledge_repository import get_ready_material_for_project
 from app.repositories.knowledge_repository import list_nodes
 from app.repositories.knowledge_repository import list_project_edges
 from app.repositories.knowledge_repository import list_sources
@@ -205,9 +205,9 @@ def delete_prerequisite_or_raise(
 
 
 def _source_block(
-    version: Any, payload: KnowledgeNodeSourceCreate
+    material: Any, payload: KnowledgeNodeSourceCreate
 ) -> tuple[str | None, str | None]:
-    metadata = version.source_metadata or {}
+    metadata = material.source_metadata or {}
     relative_path = metadata.get("sources_path")
     if not isinstance(relative_path, str):
         raise _error(
@@ -225,8 +225,8 @@ def _source_block(
         )
     try:
         source_map = json.loads(source_path.read_text(encoding="utf-8"))
-        if source_map.get("material_version_id") != version.id:
-            raise ValueError("version mismatch")
+        if source_map.get("material_id") != material.id:
+            raise ValueError("material mismatch")
         block = source_map["blocks"][payload.block_index]
         source = block["source"]
         if (
@@ -268,23 +268,23 @@ def add_source_or_raise(
 ) -> KnowledgeNodeSourceResponse:
     _project_or_raise(db, project_id=project_id, user_id=user_id)
     _node_or_raise(db, project_id=project_id, node_id=node_id)
-    version = get_ready_version_for_project(
+    material = get_ready_material_for_project(
         db,
         project_id=project_id,
         user_id=user_id,
-        material_version_id=payload.material_version_id,
+        material_id=payload.material_id,
     )
-    if version is None:
+    if material is None:
         raise _error(
             "KNOWLEDGE_SOURCE_INVALID",
-            "source must be a READY Markdown version bound to this project",
+            "source must be a READY Markdown material bound to this project",
             status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
-    quote, quote_hash = _source_block(version, payload)
+    quote, quote_hash = _source_block(material, payload)
     source = create_source(
         db,
         node_id=node_id,
-        material_version_id=version.id,
+        material_id=material.id,
         block_index=payload.block_index,
         line_start=payload.line_start,
         line_end=payload.line_end,

@@ -52,14 +52,13 @@ async def upload_material(
 
 
 @router.post(
-    "/{material_id}/versions/{version_id}/parse",
+    "/{material_id}/parse",
     response_model=MaterialParseJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="投递 Markdown 解析任务",
 )
 def enqueue_material_parse(
     material_id: int,
-    version_id: int,
     response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -68,20 +67,18 @@ def enqueue_material_parse(
         db,
         user_id=current_user.id,
         material_id=material_id,
-        version_id=version_id,
     )
     response.status_code = status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK
     return result
 
 
 @router.get(
-    "/{material_id}/versions/{version_id}/parse",
+    "/{material_id}/parse",
     response_model=MaterialParseResponse,
     summary="查询 Markdown 解析状态",
 )
 def get_material_parse_status(
     material_id: int,
-    version_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MaterialParseResponse:
@@ -89,7 +86,6 @@ def get_material_parse_status(
         db,
         user_id=current_user.id,
         material_id=material_id,
-        version_id=version_id,
     )
 
 

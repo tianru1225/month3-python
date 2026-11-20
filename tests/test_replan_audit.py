@@ -39,8 +39,6 @@ def context(
     project = LearningProject(
         user_id=user.id,
         name=f"{suffix}-project",
-        goal="replan test",
-        current_level="beginner",
     )
     db.add(project)
     db.flush()

@@ -15,15 +15,9 @@ class ProjectMaterialBindingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ProjectMaterialVersionResponse(BaseModel):
-    version_id: int
-    version_number: int
+class ProjectMaterialResponse(ProjectMaterialBindingResponse):
+    name: str
     original_filename: str
     parse_status: ParseStatus
     parse_error_code: str | None
     parse_error_message: str | None
-
-
-class ProjectMaterialResponse(ProjectMaterialBindingResponse):
-    name: str
-    latest_version: ProjectMaterialVersionResponse | None

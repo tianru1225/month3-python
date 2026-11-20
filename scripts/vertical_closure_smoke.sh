@@ -5,7 +5,6 @@ umask 077
 test -n "$SMOKE_USERNAME"
 test -n "$PROJECT_ID"
 test -n "$MATERIAL_ID"
-test -n "$MATERIAL_VERSION_ID"
 test -n "$PLAN_VERSION_ID"
 test -n "$PASS_TASK_ID"
 test -n "$REVISION_TASK_ID"
@@ -79,11 +78,10 @@ json_assert "$TMP/project.json" \
 
 echo "2/8 verify READY material through API"
 request 200 GET \
-  "/materials/$MATERIAL_ID/versions/$MATERIAL_VERSION_ID/parse" \
+  "/materials/$MATERIAL_ID/parse" \
   "$TMP/material.json"
 json_assert "$TMP/material.json" \
   'body["material_id"] == int(__import__("os").environ["MATERIAL_ID"])' \
-  'body["version_id"] == int(__import__("os").environ["MATERIAL_VERSION_ID"])' \
   'body["parse_status"] == "READY"'
 
 echo "3/8 verify published plan and initial task state"

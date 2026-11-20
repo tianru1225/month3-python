@@ -64,22 +64,22 @@ with SessionLocal() as db:
     assert project is not None, "project was not found"
     assert project.user_id == user.id, "project does not belong to the smoke user"
 
-    ready_versions = require_ready_materials_or_raise(
+    ready_materials = require_ready_materials_or_raise(
         db,
         project_id=project.id,
         user_id=user.id,
         storage_dir=MATERIAL_STORAGE_DIR,
     )
-    assert ready_versions, "READY material is required before creating a plan"
-    material_version = ready_versions[0]
-    assert material_version.content_hash
-    assert material_version.source_metadata is not None
+    assert ready_materials, "READY material is required before creating a plan"
+    material = ready_materials[0]
+    assert material.content_hash
+    assert material.source_metadata is not None
 
     source_snapshot = {
-        "material_version_id": material_version.id,
-        "original_filename": material_version.original_filename,
-        "content_hash": material_version.content_hash,
-        "normalized_format": material_version.normalized_format,
+        "material_id": material.id,
+        "original_filename": material.original_filename,
+        "content_hash": material.content_hash,
+        "normalized_format": material.normalized_format,
     }
     plan_content = {
         "source_materials": [source_snapshot],
@@ -233,7 +233,7 @@ with SessionLocal() as db:
                 "username": username,
                 "user_id": user.id,
                 "project_id": project.id,
-                "material_version_id": material_version.id,
+                "material_id": material.id,
                 "plan_id": plan.id,
                 "plan_version_id": published.id,
                 "version_number": published.version_number,

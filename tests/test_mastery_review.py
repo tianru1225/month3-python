@@ -65,8 +65,6 @@ def _context(
     project = LearningProject(
         user_id=user.id,
         name=f"{username} project",
-        goal="verify mastery history",
-        current_level="beginner",
     )
     db.add(project)
     db.flush()
