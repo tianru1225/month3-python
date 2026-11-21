@@ -145,7 +145,6 @@ def create_source(
     line_end: int,
     section_path: list[str],
     quote: str | None,
-    quote_hash: str | None,
 ) -> KnowledgeNodeSource:
     source = KnowledgeNodeSource(
         node_id=node_id,
@@ -155,7 +154,6 @@ def create_source(
         line_end=line_end,
         section_path=section_path,
         quote=quote,
-        quote_hash=quote_hash,
     )
     db.add(source)
     db.commit()

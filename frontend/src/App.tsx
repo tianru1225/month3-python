@@ -692,9 +692,9 @@ function ProjectsPage({ projects, deletingProjectId, onDelete, onCreateRequest, 
       {projects.length ? projects.map((project) =>
         <article className="project-card project-management-card" key={project.id}>
           <button className="project-card-open" type="button" disabled={busy} onClick={() => onOpenMaterial(project)}>
-            <div className="project-card-top"><span className="status-pill status-ready">{statusLabel(project.status)}</span><span className="project-id">#{project.id}</span></div>
+            <div className="project-card-top"><span className="project-id">#{project.id}</span></div>
             <h3>{project.name}</h3><p>点击添加或继续添加学习资料</p>
-            <dl><div><dt>资料入口</dt><dd>添加 Markdown</dd></div><div><dt>项目状态</dt><dd>{statusLabel(project.status)}</dd></div></dl>
+            <dl><div><dt>资料入口</dt><dd>添加 Markdown</dd></div></dl>
           </button>
           <details className="project-actions" onKeyDown={(event) => {
             if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }

@@ -90,7 +90,7 @@ def test_create_list_get_and_owner_scope(client, db_session) -> None:
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()] == [node["id"]]
     assert detail.status_code == 200
-    assert detail.json()["status"] == "DRAFT"
+    assert "status" not in detail.json()
     assert detail.json()["sources"] == []
     assert forbidden.status_code == 404
     assert forbidden.json()["detail"]["code"] == "PROJECT_NOT_FOUND"
@@ -259,7 +259,8 @@ def test_source_requires_real_ready_binding_and_location(
 
     assert response.status_code == 201, response.text
     assert response.json()["material_id"] == version.id
-    assert response.json()["quote_hash"]
+    assert response.json()["quote"] == "Markdown graph"
+    assert "quote_hash" not in response.json()
 
 
 def test_source_rejects_fake_location_and_unbound_version(
@@ -295,3 +296,38 @@ def test_knowledge_routes_require_bearer(client) -> None:
     response = client.get("/projects/1/knowledge-nodes")
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "AUTH_REQUIRED"
+
+
+@pytest.mark.parametrize("invalid_part", ["quote", "location"])
+def test_bound_ready_source_still_validates_original_text(
+    client, db_session, tmp_path, invalid_part
+) -> None:
+    headers = _register_and_login(client, "source-validation")
+    user_id = _user_id(db_session, "source-validation")
+    project = _project(db_session, user_id, "source-validation")
+    node = _node(client, headers, project.id, "Source")
+    material = _ready_source(db_session, project.id, user_id, tmp_path)
+    payload = {
+        "material_id": material.id,
+        "block_index": 0,
+        "line_start": 1,
+        "line_end": 3,
+        "section_path": ["Foundations"],
+        "quote": "Markdown graph",
+    }
+    if invalid_part == "quote":
+        payload["quote"] = "Not present in this material"
+    else:
+        payload["line_end"] = 99
+    response = client.post(
+        f"/projects/{project.id}/knowledge-nodes/{node['id']}/sources",
+        headers=headers,
+        json=payload,
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "KNOWLEDGE_SOURCE_INVALID"
+    detail = client.get(
+        f"/projects/{project.id}/knowledge-nodes/{node['id']}", headers=headers
+    )
+    assert detail.status_code == 200
+    assert detail.json()["sources"] == []

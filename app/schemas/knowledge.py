@@ -37,7 +37,6 @@ class KnowledgeNodeSourceResponse(BaseModel):
     line_end: int
     section_path: list[str]
     quote: str | None
-    quote_hash: str | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -49,7 +48,6 @@ class KnowledgeNodeResponse(BaseModel):
     title: str
     description: str
     difficulty: int
-    status: str
     created_at: datetime
     updated_at: datetime
     prerequisite_node_ids: list[int]

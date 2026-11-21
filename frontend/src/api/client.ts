@@ -10,7 +10,6 @@ export type TokenResponse = { access_token: string; token_type: string };
 export type Project = {
   id: number;
   name: string;
-  status: string;
   created_at: string;
   updated_at: string;
 };

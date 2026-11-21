@@ -5,7 +5,6 @@ from app.models.knowledge import (
     KnowledgeNode,
     KnowledgeNodePrerequisite,
     KnowledgeNodeSource,
-    KnowledgeNodeStatus,
 )
 from app.models.learning_plan import (
     LearningPlan,
@@ -54,7 +53,6 @@ __all__ = [
     "KnowledgeNode",
     "KnowledgeNodePrerequisite",
     "KnowledgeNodeSource",
-    "KnowledgeNodeStatus",
     "ReplanProposal",
     "ReplanProposalStatus",
     "AuditEvent",

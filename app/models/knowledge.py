@@ -1,17 +1,10 @@
 from datetime import datetime, timezone
-from enum import Enum
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON
 from sqlalchemy import String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-
-
-class KnowledgeNodeStatus(str, Enum):
-    DRAFT = "DRAFT"
-    ACTIVE = "ACTIVE"
-    ARCHIVED = "ARCHIVED"
 
 
 def utc_now() -> datetime:
@@ -33,10 +26,6 @@ class KnowledgeNode(Base):
             "difficulty BETWEEN 1 AND 5",
             name="ck_knowledge_nodes_difficulty",
         ),
-        CheckConstraint(
-            "status IN ('DRAFT','ACTIVE','ARCHIVED')",
-            name="ck_knowledge_nodes_status",
-        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -46,9 +35,6 @@ class KnowledgeNode(Base):
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     difficulty: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(20), default=KnowledgeNodeStatus.DRAFT.value, nullable=False
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
@@ -118,7 +104,6 @@ class KnowledgeNodeSource(Base):
     line_end: Mapped[int] = mapped_column(Integer, nullable=False)
     section_path: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     quote: Mapped[str | None] = mapped_column(Text, nullable=True)
-    quote_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

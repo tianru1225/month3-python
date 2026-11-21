@@ -75,7 +75,7 @@ def list_materials_for_management(
     return MaterialManagementPage(
         items=[
             MaterialManagementItem(
-                material_id=item.id, name=item.name, created_at=item.created_at,
+                material_id=item.id, name=item.name, created_at=item.uploaded_at,
                 deletion_pending=item.deletion_started_at is not None,
                 blockers=_blockers(db, item),
             )

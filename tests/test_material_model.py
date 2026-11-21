@@ -28,7 +28,6 @@ def test_material_persists_file_and_parse_fields(db_session) -> None:
     assert material.id > 0
     assert material.parse_status == "UPLOADED"
     assert material.uploaded_at is not None
-    assert material.created_at is not None
     assert material.updated_at is not None
     assert material.processed_at is None
     assert material.parsed_content_location is None

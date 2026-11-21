@@ -36,9 +36,8 @@ def test_create_project_uses_current_user_and_defaults(client) -> None:
 
     body = _create_project(client, headers, "  FastAPI 项目  ")
 
-    assert set(body) == {"id", "name", "status", "created_at", "updated_at"}
+    assert set(body) == {"id", "name", "created_at", "updated_at"}
     assert body["name"] == "FastAPI 项目"
-    assert body["status"] == "ACTIVE"
     assert "user_id" not in body
     assert "password_hash" not in body
 

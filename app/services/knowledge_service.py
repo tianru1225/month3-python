@@ -1,5 +1,4 @@
 import json
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +65,6 @@ def _response(
         title=node.title,
         description=node.description,
         difficulty=node.difficulty,
-        status=node.status,
         created_at=node.created_at,
         updated_at=node.updated_at,
         prerequisite_node_ids=[edge.prerequisite_node_id for edge in edges],
@@ -206,7 +204,7 @@ def delete_prerequisite_or_raise(
 
 def _source_block(
     material: Any, payload: KnowledgeNodeSourceCreate
-) -> tuple[str | None, str | None]:
+) -> str | None:
     metadata = material.source_metadata or {}
     relative_path = metadata.get("sources_path")
     if not isinstance(relative_path, str):
@@ -255,7 +253,7 @@ def _source_block(
             "quote is not contained in source block",
             status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
-    return quote, sha256(quote.encode()).hexdigest() if quote else None
+    return quote
 
 
 def add_source_or_raise(
@@ -280,7 +278,7 @@ def add_source_or_raise(
             "source must be a READY Markdown material bound to this project",
             status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
-    quote, quote_hash = _source_block(material, payload)
+    quote = _source_block(material, payload)
     source = create_source(
         db,
         node_id=node_id,
@@ -290,6 +288,5 @@ def add_source_or_raise(
         line_end=payload.line_end,
         section_path=payload.section_path,
         quote=quote,
-        quote_hash=quote_hash,
     )
     return KnowledgeNodeSourceResponse.model_validate(source)
