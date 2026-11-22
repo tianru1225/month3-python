@@ -5,7 +5,7 @@ umask 077
 test -n "$SMOKE_USERNAME"
 test -n "$PROJECT_ID"
 test -n "$MATERIAL_ID"
-test -n "$PLAN_VERSION_ID"
+test -n "$PLAN_ID"
 test -n "$PASS_TASK_ID"
 test -n "$REVISION_TASK_ID"
 test -n "$FINAL_TASK_ID"
@@ -84,9 +84,9 @@ json_assert "$TMP/material.json" \
   'body["material_id"] == int(__import__("os").environ["MATERIAL_ID"])' \
   'body["parse_status"] == "READY"'
 
-echo "3/8 verify published plan and initial task state"
+echo "3/8 verify locked plan and initial task state"
 docker compose exec -T \
-  -e PLAN_VERSION_ID="$PLAN_VERSION_ID" \
+  -e PLAN_ID="$PLAN_ID" \
   -e PASS_TASK_ID="$PASS_TASK_ID" \
   -e REVISION_TASK_ID="$REVISION_TASK_ID" \
   -e FINAL_TASK_ID="$FINAL_TASK_ID" \
@@ -95,14 +95,13 @@ import os
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
-from app.models.learning_plan import PlanVersion, PlanVersionStatus
+from app.models.learning_plan import LearningPlan
 from app.models.learning_task import LearningTask, TaskStatus, TaskPrerequisite
 
 with SessionLocal() as db:
-    version = db.get(PlanVersion, int(os.environ["PLAN_VERSION_ID"]))
+    version = db.get(LearningPlan, int(os.environ["PLAN_ID"]))
     assert version is not None
-    assert version.status == PlanVersionStatus.PUBLISHED.value
-    assert version.is_current is True
+    assert version.locked_at is not None
 
     expected = {
         int(os.environ["PASS_TASK_ID"]): TaskStatus.PASSED.value,
@@ -112,12 +111,12 @@ with SessionLocal() as db:
     for task_id, expected_status in expected.items():
         task = db.get(LearningTask, task_id)
         assert task is not None
-        assert task.plan_version_id == version.id
+        assert task.plan_id == version.id
         assert task.status == expected_status
 
     edge = db.scalar(
         select(TaskPrerequisite).where(
-            TaskPrerequisite.plan_version_id == version.id,
+            TaskPrerequisite.plan_id == version.id,
             TaskPrerequisite.task_id == int(os.environ["FINAL_TASK_ID"]),
             TaskPrerequisite.prerequisite_task_id
             == int(os.environ["REVISION_TASK_ID"]),
@@ -129,15 +128,15 @@ PY
 
 echo "4/8 verify today's task API before retry"
 request 200 GET \
-  "/projects/$PROJECT_ID/plan-versions/$PLAN_VERSION_ID/today-tasks?target_date=2026-09-29" \
+  "/projects/$PROJECT_ID/plans/$PLAN_ID/today-tasks?target_date=2026-09-29" \
   "$TMP/today-before.json"
 json_assert "$TMP/today-before.json" \
-  'body["plan_version_id"] == int(__import__("os").environ["PLAN_VERSION_ID"])' \
+  'body["plan_id"] == int(__import__("os").environ["PLAN_ID"])' \
   'any(task["id"] == int(__import__("os").environ["REVISION_TASK_ID"]) for task in body["tasks"])'
 
 echo "5/8 move task 12 from REVISION_REQUIRED to IN_PROGRESS"
 docker compose exec -T \
-  -e PLAN_VERSION_ID="$PLAN_VERSION_ID" \
+  -e PLAN_ID="$PLAN_ID" \
   -e REVISION_TASK_ID="$REVISION_TASK_ID" \
   -e SMOKE_USERNAME="$SMOKE_USERNAME" \
   api python - <<'PY'
@@ -156,7 +155,7 @@ with SessionLocal() as db:
     assert user is not None
     task = transition_task_status(
         db,
-        plan_version_id=int(os.environ["PLAN_VERSION_ID"]),
+        plan_id=int(os.environ["PLAN_ID"]),
         task_id=int(os.environ["REVISION_TASK_ID"]),
         user_id=user.id,
         target_status=TaskStatus.IN_PROGRESS,
@@ -167,7 +166,7 @@ PY
 
 echo "6/8 submit and evaluate task 12"
 request 201 POST \
-  "/plan-versions/$PLAN_VERSION_ID/tasks/$REVISION_TASK_ID/evidence" \
+  "/plans/$PLAN_ID/tasks/$REVISION_TASK_ID/evidence" \
   "$TMP/task12-evidence.json" \
   -H "Content-Type: application/json" \
   --data '{"evidence_type":"TEXT_ANSWER","text_content":"已按反馈修正，并重新验证关键结果。"}'
@@ -176,7 +175,7 @@ json_assert "$TMP/task12-evidence.json" \
   'body["attempt_number"] == 2'
 
 request 200 POST \
-  "/plan-versions/$PLAN_VERSION_ID/tasks/$REVISION_TASK_ID/evaluate" \
+  "/plans/$PLAN_ID/tasks/$REVISION_TASK_ID/evaluate" \
   "$TMP/task12-evaluation.json"
 json_assert "$TMP/task12-evaluation.json" \
   'body["evaluation"]["rule_status"] == "PASS"' \
@@ -185,7 +184,7 @@ json_assert "$TMP/task12-evaluation.json" \
 
 echo "7/8 unlock and complete task 13"
 docker compose exec -T \
-  -e PLAN_VERSION_ID="$PLAN_VERSION_ID" \
+  -e PLAN_ID="$PLAN_ID" \
   -e FINAL_TASK_ID="$FINAL_TASK_ID" \
   -e SMOKE_USERNAME="$SMOKE_USERNAME" \
   api python - <<'PY'
@@ -204,7 +203,7 @@ with SessionLocal() as db:
     assert user is not None
     task = transition_task_status(
         db,
-        plan_version_id=int(os.environ["PLAN_VERSION_ID"]),
+        plan_id=int(os.environ["PLAN_ID"]),
         task_id=int(os.environ["FINAL_TASK_ID"]),
         user_id=user.id,
         target_status=TaskStatus.READY,
@@ -212,7 +211,7 @@ with SessionLocal() as db:
     assert task.status == TaskStatus.READY.value
     task = transition_task_status(
         db,
-        plan_version_id=int(os.environ["PLAN_VERSION_ID"]),
+        plan_id=int(os.environ["PLAN_ID"]),
         task_id=int(os.environ["FINAL_TASK_ID"]),
         user_id=user.id,
         target_status=TaskStatus.IN_PROGRESS,
@@ -222,12 +221,12 @@ print("task_13_unlocked: passed")
 PY
 
 request 201 POST \
-  "/plan-versions/$PLAN_VERSION_ID/tasks/$FINAL_TASK_ID/evidence" \
+  "/plans/$PLAN_ID/tasks/$FINAL_TASK_ID/evidence" \
   "$TMP/task13-evidence.json" \
   -H "Content-Type: application/json" \
   --data '{"evidence_type":"TEST_REPORT","test_report":{"command":"pytest -q tests/test_evidence_acceptance.py","exit_code":0,"summary":"纵向闭环相关测试通过","checks":[{"name":"evidence_acceptance","status":"PASSED","details":"7 passed"}]}}'
 request 200 POST \
-  "/plan-versions/$PLAN_VERSION_ID/tasks/$FINAL_TASK_ID/evaluate" \
+  "/plans/$PLAN_ID/tasks/$FINAL_TASK_ID/evaluate" \
   "$TMP/task13-evaluation.json"
 json_assert "$TMP/task13-evaluation.json" \
   'body["evaluation"]["rule_status"] == "PASS"' \
@@ -236,7 +235,7 @@ json_assert "$TMP/task13-evaluation.json" \
 
 echo "8/8 verify final task list and prerequisite completion"
 request 200 GET \
-  "/projects/$PROJECT_ID/plan-versions/$PLAN_VERSION_ID/today-tasks?target_date=2026-09-30" \
+  "/projects/$PROJECT_ID/plans/$PLAN_ID/today-tasks?target_date=2026-09-30" \
   "$TMP/today-after.json"
 json_assert "$TMP/today-after.json" \
   'any(task["id"] == int(__import__("os").environ["FINAL_TASK_ID"]) and task["status"] == "PASSED" for task in body["tasks"])' \

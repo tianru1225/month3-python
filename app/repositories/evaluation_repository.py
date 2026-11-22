@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.evidence import Evidence
 from app.models.evaluation import Evaluation
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask
 
@@ -23,16 +23,15 @@ def get_owned_evidence_context(
     *,
     evidence_id: int,
     user_id: int,
-) -> tuple[Evidence, LearningTask, PlanVersion] | None:
+) -> tuple[Evidence, LearningTask, LearningPlan] | None:
     row = db.execute(
-        select(Evidence, LearningTask, PlanVersion)
+        select(Evidence, LearningTask, LearningPlan)
         .join(
             LearningTask,
             (LearningTask.id == Evidence.task_id)
-            & (LearningTask.plan_version_id == Evidence.plan_version_id),
+            & (LearningTask.plan_id == Evidence.plan_id),
         )
-        .join(PlanVersion, PlanVersion.id == Evidence.plan_version_id)
-        .join(LearningPlan, LearningPlan.id == PlanVersion.plan_id)
+        .join(LearningPlan, LearningPlan.id == Evidence.plan_id)
         .join(LearningProject, LearningProject.id == LearningPlan.project_id)
         .where(
             Evidence.id == evidence_id,
@@ -42,8 +41,8 @@ def get_owned_evidence_context(
     ).one_or_none()
     if row is None:
         return None
-    evidence, task, version = row
-    return evidence, task, version
+    evidence, task, plan = row
+    return evidence, task, plan
 
 
 def get_latest_evidence_for_task(

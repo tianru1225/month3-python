@@ -59,8 +59,8 @@ class ReplanProposal(Base):
     project_id: Mapped[int] = mapped_column(
         ForeignKey("learning_projects.id"), nullable=False, index=True
     )
-    base_plan_version_id: Mapped[int] = mapped_column(
-        ForeignKey("plan_versions.id"), nullable=False, index=True
+    base_plan_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_plans.id"), nullable=False, index=True
     )
     created_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True, index=True

@@ -84,7 +84,7 @@ class EvidenceSourceContext(BaseModel):
 
 class EvidenceResponse(BaseModel):
     id: int
-    plan_version_id: int
+    plan_id: int
     task_id: int
     attempt_number: int
     evidence_type: EvidenceType

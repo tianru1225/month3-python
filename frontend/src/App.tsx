@@ -225,11 +225,11 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
   const [projectId, setProjectId] = useState<number | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const planStorageKey = `learning.plan-versions.${user.id}`;
-  const [planVersions, setPlanVersions] = useState<Record<string, string>>(() => {
+  const [planIds, setPlanIds] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem(planStorageKey) || "{}"); }
     catch { return {}; }
   });
-  const planVersionId = projectId ? planVersions[projectId] || "" : "";
+  const planId = projectId ? planIds[projectId] || "" : "";
   const [targetDate, setTargetDate] = useState(localDate);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -298,20 +298,20 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
     setTasks([]);
     setSelectedTask(null);
     setTaskError("");
-    if (!projectId || !planVersionId || deletingProjectId === projectId) { setTaskLoading(false); return; }
+    if (!projectId || !planId || deletingProjectId === projectId) { setTaskLoading(false); return; }
     const controller = new AbortController();
     setTaskLoading(true);
-    void getJson<TodayTasks>(`/projects/${projectId}/plan-versions/${planVersionId}/today-tasks?target_date=${targetDate}`, token, controller.signal)
+    void getJson<TodayTasks>(`/projects/${projectId}/plans/${planId}/today-tasks?target_date=${targetDate}`, token, controller.signal)
       .then((response) => { if (active && !deleteRequest.current) setTasks(response.tasks); })
       .catch((error) => { if (active && !deleteRequest.current) setTaskError(errorText(error)); })
       .finally(() => { if (active && !deleteRequest.current) setTaskLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [projectId, planVersionId, targetDate, token, taskRefresh, deletingProjectId]);
+  }, [projectId, planId, targetDate, token, taskRefresh, deletingProjectId]);
 
-  const setPlanVersionId = (value: string) => {
+  const setPlanId = (value: string) => {
     if (!projectId) return;
-    const next = { ...planVersions, [projectId]: value.trim() };
-    setPlanVersions(next);
+    const next = { ...planIds, [projectId]: value.trim() };
+    setPlanIds(next);
     try { localStorage.setItem(planStorageKey, JSON.stringify(next)); }
     catch { setNotice({ tone: "error", text: "浏览器无法保存计划设置，刷新后需要重新选择。" }); }
     loadTasks();
@@ -356,9 +356,9 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
       const remaining = projects.filter((item) => item.id !== project.id);
       setProjects(remaining);
       setProjectId((current) => current === project.id ? remaining[0]?.id || null : current);
-      const nextPlans = { ...planVersions };
+      const nextPlans = { ...planIds };
       delete nextPlans[project.id];
-      setPlanVersions(nextPlans);
+      setPlanIds(nextPlans);
       let cacheWarning = "";
       try { localStorage.setItem(planStorageKey, JSON.stringify(nextPlans)); }
       catch { cacheWarning = " 本机计划设置清理失败；项目是否可见仍以服务器为准。"; }
@@ -404,7 +404,7 @@ function Console({ user, token, onLogout }: { user: User; token: string; onLogou
             {deletingProjectId !== null && deletingProjectId === projectId
               ? <p role="status">正在删除当前项目，学习会话已暂停…</p>
               : selectedProject
-                ? <LearningWorkspace key={`${user.id}:${projectId}`} view={view} progressTab={progressTab} onNavigate={navigate} token={token} scope={`${user.id}.${projectId}`} projectId={projectId} today={targetDate} planVersionId={planVersionId} onPlanVersionChange={setPlanVersionId} tasks={tasks} loading={loading || taskLoading} error={taskError} onEvidence={setSelectedTask} />
+                ? <LearningWorkspace key={`${user.id}:${projectId}`} view={view} progressTab={progressTab} onNavigate={navigate} token={token} scope={`${user.id}.${projectId}`} projectId={projectId} today={targetDate} planId={planId} onPlanChange={setPlanId} tasks={tasks} loading={loading || taskLoading} error={taskError} onEvidence={setSelectedTask} />
                 : loading
                   ? <p role="status">正在加载学习项目…</p>
                   : <EmptyState icon={<FolderKanban size={22} />} title={projects.length ? "请选择学习项目" : "还没有学习项目"} text="项目以服务器列表为准。创建或选择项目后继续学习。" action="新建项目" onClick={() => setCreateProjectOpen(true)} />}
@@ -489,14 +489,14 @@ function SimpleModal({ title, description, onClose, children }: { title: string;
   }}><button className="simple-modal-close" type="button" aria-label="关闭" onClick={onClose}><X size={18} /></button><p className="kicker">学习工作台</p><h2>{title}</h2>{description && <p className="simple-modal-description">{description}</p>}{children}</section></div>;
 }
 
-function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projectId, today, planVersionId, onPlanVersionChange, tasks, loading, error, onEvidence }: {
+function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projectId, today, planId, onPlanChange, tasks, loading, error, onEvidence }: {
   token: string; view: ViewKey; progressTab: ProgressTab; onNavigate: (view: ViewKey, tab?: ProgressTab) => void; scope: string; projectId: number | null;
-  today: string; planVersionId: string; onPlanVersionChange: (value: string) => void;
+  today: string; planId: string; onPlanChange: (value: string) => void;
   tasks: Task[]; loading: boolean; error: string; onEvidence: (task: Task) => void;
 }) {
   const storageKey = `learning.python-examples.${scope}`;
   const archiveKey = `learning.task-conversations.v1.${scope}`;
-  const realMode = Boolean(planVersionId);
+  const realMode = Boolean(planId);
   const [initialProgress] = useState(() => readExampleProgress(storageKey, today));
   const [storageError, setStorageError] = useState(initialProgress.error);
   const [progress, setProgress] = useState(initialProgress.progress);
@@ -505,10 +505,10 @@ function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projec
   const [archiveError, setArchiveError] = useState(initialArchive.error);
   const [mobilePane, setMobilePane] = useState<"tasks" | "chat">(initialArchive.archive.selectedId ? "chat" : "tasks");
   const [query, setQuery] = useState("");
-  const [planDraft, setPlanDraft] = useState(planVersionId);
+  const [planDraft, setPlanDraft] = useState(planId);
   const [exampleTask, setExampleTask] = useState<Task | null>(null);
   const [proposalOpen, setProposalOpen] = useState(false);
-  useEffect(() => setPlanDraft(planVersionId), [planVersionId]);
+  useEffect(() => setPlanDraft(planId), [planId]);
   useEffect(() => {
     if (initialArchive.error) return;
     try { localStorage.setItem(archiveKey, JSON.stringify(archive)); setArchiveError(""); }
@@ -582,7 +582,7 @@ function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projec
     : tasks.find((task) => taskKey(task, "real") === selected.taskKey)) || selected?.task;
   const canSubmit = Boolean(selected && !selected.activity && !readOnly && (selected.source === "example"
     ? !initialProgress.error && currentTask?.scheduled_date && currentTask.scheduled_date <= today
-    : !loading && !error && tasks.some((task) => taskKey(task, "real") === selected.taskKey && String(task.plan_version_id) === planVersionId)));
+    : !loading && !error && tasks.some((task) => taskKey(task, "real") === selected.taskKey && String(task.plan_id) === planId)));
   const source: TaskSource = realMode ? "real" : "example";
   const nextTask = selected?.source === source ? pending.find((task) => taskKey(task, source) !== selected.taskKey) : undefined;
   const dueReviews = knowledgeNodes.filter((node) => knowledgeState(node, archive, today).isDue);
@@ -650,7 +650,7 @@ function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projec
         </div>
         <span className="progress-storage-note">对话与复习记录仅保存在本机</span>
       </div>
-      <details className="plan-connection"><summary>{realMode ? `已连接计划 #${planVersionId}` : "当前体验 Python 示例"} · 连接真实计划</summary><form className="task-query" onSubmit={(event) => { event.preventDefault(); setArchive((current) => ({ ...current, selectedId: null })); onPlanVersionChange(planDraft); }}><label>已发布计划 ID<input type="number" min="1" step="1" value={planDraft} onChange={(event) => setPlanDraft(event.target.value)} placeholder="填写真实计划 ID；留空使用示例" /></label><button className="primary-button" type="submit" disabled={!projectId || loading}>{planDraft ? "连接计划" : "使用 Python 示例"}</button></form><p className="workbench-caption">真实任务仅包含接口已加载和本机有学习记录的任务，尚未同步服务端历史。</p></details>
+      <details className="plan-connection"><summary>{realMode ? `已连接计划 #${planId}` : "当前体验 Python 示例"} · 连接真实计划</summary><form className="task-query" onSubmit={(event) => { event.preventDefault(); setArchive((current) => ({ ...current, selectedId: null })); onPlanChange(planDraft); }}><label>学习计划 ID<input type="number" min="1" step="1" value={planDraft} onChange={(event) => setPlanDraft(event.target.value)} placeholder="填写真实计划 ID；留空使用示例" /></label><button className="primary-button" type="submit" disabled={!projectId || loading}>{planDraft ? "连接计划" : "使用 Python 示例"}</button></form><p className="workbench-caption">真实任务仅包含接口已加载和本机有学习记录的任务，尚未同步服务端历史。</p></details>
       {!realMode && <AdjustmentNotice archive={archive} onPreview={() => setProposalOpen(true)} />}
       {error && <p className="form-error" role="alert">计划任务加载失败：{error}</p>}
       {loading && <p role="status">正在加载任务…</p>}
@@ -662,13 +662,13 @@ function LearningWorkspace({ token, view, progressTab, onNavigate, scope, projec
         const node = itemSource === "example" ? knowledgeNodes.find((item) => item.taskId === task.id) : undefined;
         const knowledge = node ? knowledgeState(node, archive, today) : undefined;
         return <article className="surface-card task-history-card" key={taskKey(task, itemSource)}>
-          <div className="task-history-info"><div className="task-history-meta"><span>{taskDisplayId(task, itemSource)}</span><span>{itemSource === "example" ? "Python 示例" : `真实计划 #${task.plan_version_id}`}</span><span className={`status-pill status-${task.status.toLowerCase()}`}>{statusLabel(task.status)}</span></div><h3>{task.title}</h3><p>{task.objective}</p><small>{records.length ? `最近学习 ${new Date(records[0].updatedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · ${records.length} 轮记录` : `尚未开始对话 · 计划日期 ${task.scheduled_date || "未安排"}`}</small></div>
+          <div className="task-history-info"><div className="task-history-meta"><span>{taskDisplayId(task, itemSource)}</span><span>{itemSource === "example" ? "Python 示例" : `真实计划 #${task.plan_id}`}</span><span className={`status-pill status-${task.status.toLowerCase()}`}>{statusLabel(task.status)}</span></div><h3>{task.title}</h3><p>{task.objective}</p><small>{records.length ? `最近学习 ${new Date(records[0].updatedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · ${records.length} 轮记录` : `尚未开始对话 · 计划日期 ${task.scheduled_date || "未安排"}`}</small></div>
           <button className="secondary-button" type="button" onClick={() => openTask(task, itemSource)}>{records.length ? task.status === "PASSED" ? "查看记录" : "继续学习" : "开始学习"}<ArrowRight size={15} /></button>
           {node && knowledge && <div className="task-knowledge-summary"><div><span className="task-knowledge-label">{knowledge.seeded ? "预置演示" : "本机固定题"}</span><span>知识表现 · {knowledge.level}</span><span className={knowledge.isDue ? "task-review-due" : ""}>{knowledge.isDue ? "复习 · 今天建议" : knowledge.due ? `下次复习 · ${knowledge.due}` : "复习 · 尚未安排"}</span></div><button className="link-button" type="button" onClick={() => openActivity(node.id, "review")}>{knowledge.isDue ? "去复习" : "练一题"}<ArrowRight size={14} /></button></div>}
           {records.length > 0 && <details className="task-session-history"><summary>学习与复习记录 · {records.length}</summary>{records.map((record) => { const group = records.filter((item) => activityGroup(item) === activityGroup(record)); const index = group.findIndex((item) => item.id === record.id); return <button key={record.id} type="button" onClick={() => selectSession(record.id)}><span>{record.activity ? record.activity.kind === "review" ? "复习" : "补基础" : "学习"} · 第 {group.length - index} 轮 · {record.activity?.completedAt ? "已核对" : index === 0 ? "当前对话" : "历史记录"}</span><span>{new Date(record.startedAt).toLocaleString("zh-CN")} · {record.messages.length} 条消息<ArrowRight size={14} /></span></button>; })}</details>}
         </article>;
       })}</section>
-      {!history.length && <EmptyState icon={<ClipboardCheck size={22} />} title={query ? "没有找到匹配的任务" : "还没有任务记录"} text={query ? "试试任务名称、数字编号或 PY-001。" : "选择示例或连接已发布计划后开始学习。"} />}
+      {!history.length && <EmptyState icon={<ClipboardCheck size={22} />} title={query ? "没有找到匹配的任务" : "还没有任务记录"} text={query ? "试试任务名称、数字编号或 PY-001。" : "选择示例或连接学习计划后开始学习。"} />}
       </> : <ReviewPage archive={archive} today={today} realMode={realMode} onReview={(id) => openActivity(id, "review")} onOriginal={openOriginal} onSession={selectSession} />}
       </div>
     </div>}
@@ -739,7 +739,7 @@ function EvidenceModal({ task, token, savedEvidence, onClose, onExampleSubmit, o
       let nextStatus: string;
       if (onExampleSubmit) nextStatus = await onExampleSubmit(payload);
       else {
-        const path = `/plan-versions/${task.plan_version_id}/tasks/${task.id}`;
+        const path = `/plans/${task.plan_id}/tasks/${task.id}`;
         if (!submitted) {
           await postJson(`${path}/evidence`, payload, token);
           setSubmitted(true);

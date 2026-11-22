@@ -53,7 +53,7 @@ export type MaterialParse = {
 
 export type Task = {
   id: number;
-  plan_version_id: number;
+  plan_id: number;
   position: number;
   scheduled_date: string | null;
   title: string;
@@ -72,7 +72,7 @@ export type Task = {
 
 export type TodayTasks = {
   project_id: number;
-  plan_version_id: number;
+  plan_id: number;
   target_date: string;
   tasks: Task[];
 };

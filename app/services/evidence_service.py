@@ -3,15 +3,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.evidence import Evidence
-from app.models.learning_plan import PlanVersion, PlanVersionStatus
+from app.models.learning_plan import LearningPlan
 from app.models.learning_task import LearningTask, TaskStatus
 from app.repositories.evidence_repository import (
     add_evidence,
     list_task_evidence as repository_list_task_evidence,
     next_attempt_number,
 )
+from app.repositories.learning_plan_repository import get_owned_plan
 from app.repositories.learning_task_repository import (
-    get_owned_plan_version,
     get_task,
 )
 from app.schemas.evidence import (
@@ -33,54 +33,54 @@ def _error(code: str, message: str, status_code: int) -> HTTPException:
 def _get_owned_task_or_raise(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     user_id: int,
-) -> tuple[PlanVersion, LearningTask]:
-    version = get_owned_plan_version(
+) -> tuple[LearningPlan, LearningTask]:
+    plan = get_owned_plan(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
     )
-    if version is None:
+    if plan is None:
         raise _error(
-            "PLAN_VERSION_NOT_FOUND",
-            "plan version not found",
+            "PLAN_NOT_FOUND",
+            "plan not found",
             status.HTTP_404_NOT_FOUND,
         )
     task = get_task(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
     )
     if task is None:
         raise _error(
             "LEARNING_TASK_NOT_FOUND",
-            "learning task not found in this plan version",
+            "learning task not found in this plan",
             status.HTTP_404_NOT_FOUND,
         )
-    return version, task
+    return plan, task
 
 
 def submit_evidence(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     user_id: int,
     payload: EvidenceCreate,
     source: EvidenceSourceContext,
 ) -> Evidence:
-    version, task = _get_owned_task_or_raise(
+    plan, task = _get_owned_task_or_raise(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
         user_id=user_id,
     )
-    if version.status != PlanVersionStatus.PUBLISHED.value or not version.is_current:
+    if plan.locked_at is None:
         raise _error(
-            "PLAN_VERSION_NOT_ACTIVE",
-            "evidence can only be submitted to the current published plan version",
+            "PLAN_NOT_STARTED",
+            "evidence can only be submitted to the started plan",
             status.HTTP_409_CONFLICT,
         )
     if task.status != TaskStatus.IN_PROGRESS.value:
@@ -102,7 +102,7 @@ def submit_evidence(
     try:
         evidence = add_evidence(
             db,
-            plan_version_id=plan_version_id,
+            plan_id=plan_id,
             task_id=task.id,
             attempt_number=next_attempt_number(db, task_id=task.id),
             evidence_type=payload.evidence_type.value,
@@ -123,7 +123,7 @@ def submit_evidence(
     try:
         transition_task_status(
             db,
-            plan_version_id=plan_version_id,
+            plan_id=plan_id,
             task_id=task.id,
             user_id=user_id,
             target_status=TaskStatus.SUBMITTED,
@@ -138,13 +138,13 @@ def submit_evidence(
 def list_task_evidence(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     user_id: int,
 ) -> list[Evidence]:
     _, task = _get_owned_task_or_raise(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
         user_id=user_id,
     )

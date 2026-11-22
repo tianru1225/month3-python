@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.replan import AuditEvent, ReplanProposal
 
@@ -20,19 +20,17 @@ def get_owned_project(
     )
 
 
-def get_owned_current_published_version(
+def get_owned_started_plan(
     db: Session, *, project_id: int, user_id: int
-) -> PlanVersion | None:
+) -> LearningPlan | None:
     return db.scalar(
-        select(PlanVersion)
-        .join(LearningPlan, LearningPlan.id == PlanVersion.plan_id)
+        select(LearningPlan)
         .join(LearningProject, LearningProject.id == LearningPlan.project_id)
         .where(
             LearningProject.id == project_id,
             LearningProject.user_id == user_id,
             LearningProject.deleted_at.is_(None),
-            PlanVersion.status == "PUBLISHED",
-            PlanVersion.is_current.is_(True),
+            LearningPlan.locked_at.is_not(None),
         )
     )
 
@@ -72,7 +70,7 @@ def add_proposal(
     db: Session,
     *,
     project_id: int,
-    base_plan_version_id: int,
+    base_plan_id: int,
     created_by_user_id: int,
     trigger_code: str,
     reason: str,
@@ -81,7 +79,7 @@ def add_proposal(
 ) -> ReplanProposal:
     proposal = ReplanProposal(
         project_id=project_id,
-        base_plan_version_id=base_plan_version_id,
+        base_plan_id=base_plan_id,
         created_by_user_id=created_by_user_id,
         trigger_code=trigger_code,
         reason=reason,

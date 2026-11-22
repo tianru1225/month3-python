@@ -5,7 +5,7 @@ from app.core.task_state import (
     InvalidTaskStatusTransition,
     require_task_status_transition,
 )
-from app.models.learning_plan import PlanVersion, PlanVersionStatus
+from app.models.learning_plan import LearningPlan
 from app.models.learning_task import (
     LearningTask,
     TaskPrerequisite,
@@ -17,7 +17,6 @@ from app.repositories.learning_task_repository import (
     add_task,
     compare_and_set_task_status,
     get_edge,
-    get_owned_plan_version,
     get_task,
     get_task_by_position,
     list_edges,
@@ -25,6 +24,7 @@ from app.repositories.learning_task_repository import (
     list_prerequisite_statuses,
     list_tasks,
 )
+from app.repositories.learning_plan_repository import get_owned_plan
 from app.schemas.learning_task import LearningTaskCreate
 
 
@@ -35,37 +35,38 @@ def _error(code: str, message: str, status_code: int) -> HTTPException:
     )
 
 
-def _get_owned_version_or_raise(
-    db: Session, *, plan_version_id: int, user_id: int
-) -> PlanVersion:
-    version = get_owned_plan_version(
+def _get_owned_plan_or_raise(
+    db: Session, *, plan_id: int, user_id: int, lock: bool = False
+) -> LearningPlan:
+    plan = get_owned_plan(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
+        lock=lock,
     )
-    if version is None:
+    if plan is None:
         raise _error(
-            "PLAN_VERSION_NOT_FOUND",
-            "plan version not found",
+            "PLAN_NOT_FOUND",
+            "plan not found",
             status.HTTP_404_NOT_FOUND,
         )
-    return version
+    return plan
 
 
-def _require_draft(version: PlanVersion) -> None:
-    if version.status != PlanVersionStatus.DRAFT.value:
+def _require_unstarted(plan: LearningPlan) -> None:
+    if plan.locked_at is not None:
         raise _error(
-            "PLAN_VERSION_IMMUTABLE",
-            "tasks can only be changed on a draft plan version",
+            "PLAN_STARTED",
+            "tasks cannot be changed after learning starts",
             status.HTTP_409_CONFLICT,
         )
 
 
-def _require_current_published(version: PlanVersion) -> None:
-    if version.status != PlanVersionStatus.PUBLISHED.value or not version.is_current:
+def _require_started(plan: LearningPlan) -> None:
+    if plan.locked_at is None:
         raise _error(
-            "PLAN_VERSION_NOT_ACTIVE",
-            "task status can only change on the current published plan version",
+            "PLAN_NOT_STARTED",
+            "task status can only change on the started plan",
             status.HTTP_409_CONFLICT,
         )
 
@@ -73,33 +74,34 @@ def _require_current_published(version: PlanVersion) -> None:
 def create_task(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     user_id: int,
     payload: LearningTaskCreate,
 ) -> LearningTask:
-    version = _get_owned_version_or_raise(
+    plan = _get_owned_plan_or_raise(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
+        lock=True,
     )
-    _require_draft(version)
+    _require_unstarted(plan)
     if (
         get_task_by_position(
             db,
-            plan_version_id=plan_version_id,
+            plan_id=plan_id,
             position=payload.position,
         )
         is not None
     ):
         raise _error(
             "TASK_POSITION_CONFLICT",
-            "task position already exists in this plan version",
+            "task position already exists in this plan",
             status.HTTP_409_CONFLICT,
         )
     try:
         task = add_task(
             db,
-            plan_version_id=plan_version_id,
+            plan_id=plan_id,
             position=payload.position,
             scheduled_date=payload.scheduled_date,
             title=payload.title,
@@ -118,15 +120,15 @@ def create_task(
         raise
 
 
-def list_version_tasks(
-    db: Session, *, plan_version_id: int, user_id: int
+def list_plan_tasks(
+    db: Session, *, plan_id: int, user_id: int
 ) -> list[LearningTask]:
-    _get_owned_version_or_raise(
+    _get_owned_plan_or_raise(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
     )
-    return list_tasks(db, plan_version_id=plan_version_id)
+    return list_tasks(db, plan_id=plan_id)
 
 
 def _would_create_cycle(
@@ -155,32 +157,33 @@ def _would_create_cycle(
 def add_task_prerequisite(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     prerequisite_task_id: int,
     user_id: int,
 ) -> tuple[TaskPrerequisite, bool]:
-    version = _get_owned_version_or_raise(
+    plan = _get_owned_plan_or_raise(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
+        lock=True,
     )
-    _require_draft(version)
+    _require_unstarted(plan)
 
     task = get_task(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
     )
     prerequisite = get_task(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=prerequisite_task_id,
     )
     if task is None or prerequisite is None:
         raise _error(
             "LEARNING_TASK_NOT_FOUND",
-            "learning task not found in this plan version",
+            "learning task not found in this plan",
             status.HTTP_404_NOT_FOUND,
         )
     if task.id == prerequisite.id:
@@ -199,7 +202,7 @@ def add_task_prerequisite(
         return existing, False
 
     if _would_create_cycle(
-        list_edges(db, plan_version_id=plan_version_id),
+        list_edges(db, plan_id=plan_id),
         task_id=task.id,
         prerequisite_task_id=prerequisite.id,
     ):
@@ -212,7 +215,7 @@ def add_task_prerequisite(
     try:
         edge = add_edge(
             db,
-            plan_version_id=plan_version_id,
+            plan_id=plan_id,
             task_id=task.id,
             prerequisite_task_id=prerequisite.id,
         )
@@ -227,24 +230,24 @@ def add_task_prerequisite(
 def get_task_prerequisite_ids(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     user_id: int,
 ) -> list[int]:
-    _get_owned_version_or_raise(
+    _get_owned_plan_or_raise(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
     )
     task = get_task(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
     )
     if task is None:
         raise _error(
             "LEARNING_TASK_NOT_FOUND",
-            "learning task not found in this plan version",
+            "learning task not found in this plan",
             status.HTTP_404_NOT_FOUND,
         )
     return list_prerequisite_ids(db, task_id=task.id)
@@ -253,28 +256,29 @@ def get_task_prerequisite_ids(
 def transition_task_status(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     user_id: int,
     target_status: TaskStatus,
     commit: bool = True,
 ) -> LearningTask:
-    version = _get_owned_version_or_raise(
+    plan = _get_owned_plan_or_raise(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
+        lock=True,
     )
-    _require_current_published(version)
+    _require_started(plan)
 
     task = get_task(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
     )
     if task is None:
         raise _error(
             "LEARNING_TASK_NOT_FOUND",
-            "learning task not found in this plan version",
+            "learning task not found in this plan",
             status.HTTP_404_NOT_FOUND,
         )
 
@@ -294,7 +298,7 @@ def transition_task_status(
     if target_status == TaskStatus.READY:
         prerequisite_statuses = list_prerequisite_statuses(
             db,
-            plan_version_id=plan_version_id,
+            plan_id=plan_id,
             task_id=task.id,
         )
         if any(
@@ -311,7 +315,7 @@ def transition_task_status(
     try:
         updated = compare_and_set_task_status(
             db,
-            plan_version_id=plan_version_id,
+            plan_id=plan_id,
             task_id=task.id,
             expected_status=current_status.value,
             target_status=target_status.value,

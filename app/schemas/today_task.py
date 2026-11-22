@@ -18,6 +18,6 @@ class TodayTaskResponse(LearningTaskResponse):
 
 class TodayTasksResponse(BaseModel):
     project_id: int
-    plan_version_id: int
+    plan_id: int
     target_date: date
     tasks: list[TodayTaskResponse]

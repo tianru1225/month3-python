@@ -43,7 +43,7 @@ class LearningTaskCreate(BaseModel):
 
 class LearningTaskResponse(BaseModel):
     id: int
-    plan_version_id: int
+    plan_id: int
     position: int
     scheduled_date: date | None
     title: str
@@ -66,7 +66,7 @@ class LearningTaskDetailResponse(LearningTaskResponse):
 
 class TaskPrerequisiteResponse(BaseModel):
     id: int
-    plan_version_id: int
+    plan_id: int
     task_id: int
     prerequisite_task_id: int
     created_at: datetime

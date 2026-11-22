@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.evaluation import Evaluation, EvaluationDecision
 from app.models.evidence import Evidence
-from app.models.learning_plan import PlanVersion, PlanVersionStatus
+from app.models.learning_plan import LearningPlan
 from app.models.learning_task import LearningTask, TaskStatus
 from app.repositories.evaluation_repository import (
     add_evaluation,
@@ -42,7 +42,7 @@ def _get_owned_evidence_or_raise(
     *,
     evidence_id: int,
     user_id: int,
-) -> tuple[Evidence, LearningTask, PlanVersion]:
+) -> tuple[Evidence, LearningTask, LearningPlan]:
     context = get_owned_evidence_context(
         db,
         evidence_id=evidence_id,
@@ -63,12 +63,12 @@ def _require_active_submitted_latest(
     *,
     evidence: Evidence,
     task: LearningTask,
-    version: PlanVersion,
+    plan: LearningPlan,
 ) -> None:
-    if version.status != PlanVersionStatus.PUBLISHED.value or not version.is_current:
+    if plan.locked_at is None:
         raise _error(
-            "PLAN_VERSION_NOT_ACTIVE",
-            "evaluation requires the current published plan version",
+            "PLAN_NOT_STARTED",
+            "evaluation requires the started plan",
             status.HTTP_409_CONFLICT,
         )
     if task.status != TaskStatus.SUBMITTED.value:
@@ -92,7 +92,7 @@ def _get_owned_evaluation_or_raise(
     *,
     evaluation_id: int,
     user_id: int,
-) -> tuple[Evaluation, Evidence, LearningTask, PlanVersion]:
+) -> tuple[Evaluation, Evidence, LearningTask, LearningPlan]:
     evaluation = get_by_id(db, evaluation_id=evaluation_id)
     if evaluation is None:
         raise _error(
@@ -111,8 +111,8 @@ def _get_owned_evaluation_or_raise(
             "evaluation not found",
             status.HTTP_404_NOT_FOUND,
         )
-    evidence, task, version = context
-    return evaluation, evidence, task, version
+    evidence, task, plan = context
+    return evaluation, evidence, task, plan
 
 
 def create_evaluation(
@@ -135,7 +135,7 @@ def create_evaluation(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
-    evidence, task, version = _get_owned_evidence_or_raise(
+    evidence, task, plan = _get_owned_evidence_or_raise(
         db,
         evidence_id=evidence_id,
         user_id=user_id,
@@ -150,7 +150,7 @@ def create_evaluation(
         db,
         evidence=evidence,
         task=task,
-        version=version,
+        plan=plan,
     )
 
     try:
@@ -184,7 +184,7 @@ def record_model_suggestion(
     user_id: int,
     payload: ModelSuggestionCreate,
 ) -> Evaluation:
-    evaluation, evidence, task, version = _get_owned_evaluation_or_raise(
+    evaluation, evidence, task, plan = _get_owned_evaluation_or_raise(
         db,
         evaluation_id=evaluation_id,
         user_id=user_id,
@@ -199,7 +199,7 @@ def record_model_suggestion(
         db,
         evidence=evidence,
         task=task,
-        version=version,
+        plan=plan,
     )
 
     suggestion = payload.model_dump(mode="json")
@@ -224,7 +224,7 @@ def confirm_evaluation(
     user_id: int,
     payload: HumanDecisionCreate,
 ) -> Evaluation:
-    evaluation, evidence, task, version = _get_owned_evaluation_or_raise(
+    evaluation, evidence, task, plan = _get_owned_evaluation_or_raise(
         db,
         evaluation_id=evaluation_id,
         user_id=user_id,
@@ -239,7 +239,7 @@ def confirm_evaluation(
         db,
         evidence=evidence,
         task=task,
-        version=version,
+        plan=plan,
     )
 
     try:
@@ -265,7 +265,7 @@ def finalize_evaluation(
     evaluation_id: int,
     user_id: int,
 ) -> Evaluation:
-    evaluation, evidence, task, version = _get_owned_evaluation_or_raise(
+    evaluation, evidence, task, plan = _get_owned_evaluation_or_raise(
         db,
         evaluation_id=evaluation_id,
         user_id=user_id,
@@ -280,7 +280,7 @@ def finalize_evaluation(
         db,
         evidence=evidence,
         task=task,
-        version=version,
+        plan=plan,
     )
     if evaluation.human_decision is None:
         raise _error(
@@ -301,7 +301,7 @@ def finalize_evaluation(
         )
         transition_task_status(
             db,
-            plan_version_id=task.plan_version_id,
+            plan_id=task.plan_id,
             task_id=task.id,
             user_id=user_id,
             target_status=target_status,

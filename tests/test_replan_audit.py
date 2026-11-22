@@ -9,9 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.models.learning_plan import (
     LearningPlan,
-    PlanSourceKind,
-    PlanVersion,
-    PlanVersionStatus,
 )
 from app.models.learning_project import LearningProject
 from app.models.replan import (
@@ -32,34 +29,19 @@ def now() -> datetime:
 
 def context(
     db: Session, suffix: str
-) -> tuple[User, LearningProject, LearningPlan, PlanVersion]:
+) -> tuple[User, LearningProject, LearningPlan, LearningPlan]:
     user = User(username=f"{suffix}-user", password_hash="test-password")
     db.add(user)
     db.flush()
-    project = LearningProject(
-        user_id=user.id,
-        name=f"{suffix}-project",
-    )
+    project = LearningProject(user_id=user.id, name=f"{suffix}-project")
     db.add(project)
     db.flush()
-    plan = LearningPlan(project_id=project.id, name=f"{suffix}-plan")
-    db.add(plan)
-    db.flush()
-    version = PlanVersion(
-        plan_id=plan.id,
-        version_number=1,
-        status=PlanVersionStatus.PUBLISHED.value,
-        goal="test goal",
-        content={"tasks": [{"title": "read"}]},
-        source_kind=PlanSourceKind.MANUAL.value,
-        published_at=now(),
-        confirmed_by_user_id=user.id,
-        is_current=True,
+    plan = LearningPlan(
+        project_id=project.id, content={}, locked_at=now(),
     )
-    db.add(version)
+    db.add(plan)
     db.commit()
-    return user, project, plan, version
-
+    return user, project, plan, plan
 
 def payload() -> tuple[dict[str, object], dict[str, object]]:
     return (
@@ -74,14 +56,14 @@ def payload() -> tuple[dict[str, object], dict[str, object]]:
 
 
 def create_proposal(
-    db: Session, user: User, project: LearningProject, version: PlanVersion
+    db: Session, user: User, project: LearningProject, version: LearningPlan
 ) -> ReplanProposal:
     content, diff = payload()
     proposal, _ = replan_service.create_replan_proposal(
         db,
         project_id=project.id,
         user_id=user.id,
-        base_plan_version_id=version.id,
+        base_plan_id=version.id,
         trigger_code="MASTERY_DROP",
         reason="mastery decreased",
         proposed_content=content,
@@ -93,7 +75,7 @@ def create_proposal(
 def test_schema_and_diff() -> None:
     content, diff = payload()
     request = ReplanProposalCreate(
-        base_plan_version_id=1,
+        base_plan_id=1,
         trigger_code="MASTERY_DROP",
         reason="failed twice",
         proposed_content=content,
@@ -103,7 +85,7 @@ def test_schema_and_diff() -> None:
     assert ReplanDecisionCreate(note="reviewed").note == "reviewed"
     with pytest.raises(ValidationError):
         ReplanProposalCreate(
-            base_plan_version_id=1,
+            base_plan_id=1,
             trigger_code="MASTERY_DROP",
             reason=" ",
             proposed_content=content,
@@ -117,7 +99,7 @@ def test_create_and_created_audit(db_session: Session) -> None:
         db_session,
         project_id=project.id,
         user_id=user.id,
-        base_plan_version_id=version.id,
+        base_plan_id=version.id,
         trigger_code="MASTERY_DROP",
         reason="mastery decreased",
         proposed_content=payload()[0],
@@ -128,59 +110,42 @@ def test_create_and_created_audit(db_session: Session) -> None:
     assert event.event_type == AuditEventType.PROPOSAL_CREATED.value
 
 
-def test_current_version_gate_and_ownership(db_session: Session) -> None:
-    user, project, plan, current = context(db_session, "gate")
-    old = PlanVersion(
-        plan_id=plan.id,
-        version_number=2,
-        status=PlanVersionStatus.DRAFT.value,
-        goal="draft",
-        content={"tasks": []},
-        source_kind=PlanSourceKind.MANUAL.value,
-        is_current=False,
-    )
-    db_session.add(old)
+def test_started_plan_gate_and_ownership(db_session: Session) -> None:
+    user, project, _, plan = context(db_session, "gate")
+    plan.locked_at = None
     db_session.commit()
     with pytest.raises(HTTPException) as error:
-        create_proposal(db_session, user, project, old)
-    assert error.value.status_code == 409
-    assert error.value.detail["code"] == "PLAN_VERSION_NOT_ACTIVE"
-
+        create_proposal(db_session, user, project, plan)
+    assert error.value.detail["code"] == "PLAN_NOT_STARTED"
     outsider = User(username="replan-outsider", password_hash="test-password")
     db_session.add(outsider)
     db_session.commit()
     with pytest.raises(HTTPException) as error:
         replan_service.create_replan_proposal(
-            db_session,
-            project_id=project.id,
-            user_id=outsider.id,
-            base_plan_version_id=current.id,
-            trigger_code="MANUAL",
-            reason="cross user",
-            proposed_content=payload()[0],
-            diff=payload()[1],
+            db_session, project_id=project.id, user_id=outsider.id,
+            base_plan_id=plan.id, trigger_code="MANUAL", reason="cross user",
+            proposed_content=payload()[0], diff=payload()[1],
         )
     assert error.value.status_code == 404
 
-
-def test_accept_reject_and_no_new_version(db_session: Session) -> None:
+def test_accept_reject_does_not_replace_plan(db_session: Session) -> None:
     user, project, plan, version = context(db_session, "decision")
     proposal = create_proposal(db_session, user, project, version)
     before = db_session.scalar(
         select(func.count())
-        .select_from(PlanVersion)
-        .where(PlanVersion.plan_id == plan.id)
+        .select_from(LearningPlan)
+        .where(LearningPlan.id == plan.id)
     )
     accepted, accepted_event = replan_service.accept_replan_proposal(
         db_session,
         proposal_id=proposal.id,
         user_id=user.id,
-        decision_note="accept later publish",
+        decision_note="record decision only",
     )
     after = db_session.scalar(
         select(func.count())
-        .select_from(PlanVersion)
-        .where(PlanVersion.plan_id == plan.id)
+        .select_from(LearningPlan)
+        .where(LearningPlan.id == plan.id)
     )
     assert accepted.status == ReplanProposalStatus.ACCEPTED.value
     assert accepted_event.event_type == AuditEventType.PROPOSAL_ACCEPTED.value
@@ -228,7 +193,7 @@ def test_database_constraints(db_session: Session) -> None:
     db_session.add(
         ReplanProposal(
             project_id=project.id,
-            base_plan_version_id=version.id,
+            base_plan_id=version.id,
             created_by_user_id=user.id,
             trigger_code="MANUAL",
             reason="invalid pending",
@@ -247,7 +212,7 @@ def test_database_constraints(db_session: Session) -> None:
     db_session.add(
         ReplanProposal(
             project_id=project.id,
-            base_plan_version_id=version.id,
+            base_plan_id=version.id,
             created_by_user_id=user.id,
             trigger_code="MANUAL",
             reason="invalid status",

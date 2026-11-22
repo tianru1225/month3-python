@@ -36,9 +36,9 @@ class Evidence(Base):
     __tablename__ = "evidence"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["task_id", "plan_version_id"],
-            ["learning_tasks.id", "learning_tasks.plan_version_id"],
-            name="fk_evidence_task_version",
+            ["task_id", "plan_id"],
+            ["learning_tasks.id", "learning_tasks.plan_id"],
+            name="fk_evidence_task_plan",
         ),
         UniqueConstraint(
             "task_id",
@@ -83,7 +83,7 @@ class Evidence(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    plan_version_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    plan_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     task_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
     evidence_type: Mapped[str] = mapped_column(String(20), nullable=False)

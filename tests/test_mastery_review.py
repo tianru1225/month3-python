@@ -16,9 +16,6 @@ from app.models.evidence import Evidence, EvidenceSourceKind, EvidenceType
 from app.models.knowledge import KnowledgeNode
 from app.models.learning_plan import (
     LearningPlan,
-    PlanSourceKind,
-    PlanVersion,
-    PlanVersionStatus,
 )
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskStatus
@@ -46,12 +43,12 @@ def _context(
     *,
     decision: EvaluationDecision = EvaluationDecision.PASSED,
     finalized: bool = True,
-    is_current: bool = True,
+    started: bool = True,
 ) -> tuple[
     User,
     LearningProject,
     KnowledgeNode,
-    PlanVersion,
+    LearningPlan,
     LearningTask,
     Evaluation,
 ]:
@@ -75,23 +72,11 @@ def _context(
         description="knowledge node for mastery testing",
         difficulty=2,
     )
-    plan = LearningPlan(
-        project_id=project.id,
-        name=f"{username} plan",
-    )
-    db.add_all([node, plan])
+    db.add(node)
     db.flush()
-
-    version = PlanVersion(
-        plan_id=plan.id,
-        version_number=1,
-        status=PlanVersionStatus.PUBLISHED.value,
-        goal="verify mastery",
-        content={},
-        source_kind=PlanSourceKind.MANUAL.value,
-        published_at=utc_now(),
-        confirmed_by_user_id=user.id,
-        is_current=is_current,
+    version = LearningPlan(
+        project_id=project.id, content={},
+        locked_at=utc_now() if started else None,
     )
     db.add(version)
     db.flush()
@@ -100,7 +85,7 @@ def _context(
         TaskStatus(decision.value).value if finalized else TaskStatus.SUBMITTED.value
     )
     task = LearningTask(
-        plan_version_id=version.id,
+        plan_id=version.id,
         position=1,
         title="Mastery task",
         objective="Produce evidence",
@@ -116,7 +101,7 @@ def _context(
     db.flush()
 
     evidence = Evidence(
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         attempt_number=1,
         evidence_type=EvidenceType.TEXT_ANSWER.value,
@@ -158,14 +143,14 @@ def _additional_final_evaluation(
     db: Session,
     *,
     user: User,
-    version: PlanVersion,
+    version: LearningPlan,
     position: int,
     decision: EvaluationDecision,
     finalized_at: datetime,
 ) -> Evaluation:
     task_status = TaskStatus(decision.value).value
     task = LearningTask(
-        plan_version_id=version.id,
+        plan_id=version.id,
         position=position,
         title=f"Mastery task {position}",
         objective="Produce another evidence item",
@@ -181,7 +166,7 @@ def _additional_final_evaluation(
     db.flush()
 
     evidence = Evidence(
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         attempt_number=1,
         evidence_type=EvidenceType.TEXT_ANSWER.value,
@@ -533,13 +518,13 @@ def test_cross_user_evaluation_is_hidden(
     )
 
 
-def test_non_current_plan_version_is_rejected(
+def test_unstarted_plan_is_rejected(
     db_session: Session,
 ) -> None:
     user, _, node, _, _, evaluation = _context(
         db_session,
         "day138-old-version",
-        is_current=False,
+        started=False,
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -550,7 +535,7 @@ def test_non_current_plan_version_is_rejected(
             user_id=user.id,
         )
 
-    _assert_error(exc_info, code="PLAN_VERSION_NOT_ACTIVE")
+    _assert_error(exc_info, code="PLAN_NOT_STARTED")
 
 
 def test_complete_review_item_and_reject_repeat(

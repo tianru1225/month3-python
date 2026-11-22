@@ -3,51 +3,34 @@ from datetime import date, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models.learning_plan import LearningPlan, PlanVersion
-from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskPrerequisite
 
 
-def get_owned_plan_version(
-    db: Session, *, plan_version_id: int, user_id: int
-) -> PlanVersion | None:
-    return db.scalar(
-        select(PlanVersion)
-        .join(LearningPlan, LearningPlan.id == PlanVersion.plan_id)
-        .join(LearningProject, LearningProject.id == LearningPlan.project_id)
-        .where(
-            PlanVersion.id == plan_version_id,
-            LearningProject.user_id == user_id,
-            LearningProject.deleted_at.is_(None),
-        )
-    )
-
-
-def get_task(db: Session, *, plan_version_id: int, task_id: int) -> LearningTask | None:
+def get_task(db: Session, *, plan_id: int, task_id: int) -> LearningTask | None:
     return db.scalar(
         select(LearningTask).where(
             LearningTask.id == task_id,
-            LearningTask.plan_version_id == plan_version_id,
+            LearningTask.plan_id == plan_id,
         )
     )
 
 
 def get_task_by_position(
-    db: Session, *, plan_version_id: int, position: int
+    db: Session, *, plan_id: int, position: int
 ) -> LearningTask | None:
     return db.scalar(
         select(LearningTask).where(
-            LearningTask.plan_version_id == plan_version_id,
+            LearningTask.plan_id == plan_id,
             LearningTask.position == position,
         )
     )
 
 
-def list_tasks(db: Session, *, plan_version_id: int) -> list[LearningTask]:
+def list_tasks(db: Session, *, plan_id: int) -> list[LearningTask]:
     return list(
         db.scalars(
             select(LearningTask)
-            .where(LearningTask.plan_version_id == plan_version_id)
+            .where(LearningTask.plan_id == plan_id)
             .order_by(
                 LearningTask.scheduled_date.asc().nulls_last(),
                 LearningTask.position.asc(),
@@ -60,7 +43,7 @@ def list_tasks(db: Session, *, plan_version_id: int) -> list[LearningTask]:
 def add_task(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     position: int,
     scheduled_date: date | None,
     title: str,
@@ -72,7 +55,7 @@ def add_task(
     acceptance_criteria: list[str],
 ) -> LearningTask:
     task = LearningTask(
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         position=position,
         scheduled_date=scheduled_date,
         title=title,
@@ -88,11 +71,11 @@ def add_task(
     return task
 
 
-def list_edges(db: Session, *, plan_version_id: int) -> list[TaskPrerequisite]:
+def list_edges(db: Session, *, plan_id: int) -> list[TaskPrerequisite]:
     return list(
         db.scalars(
             select(TaskPrerequisite)
-            .where(TaskPrerequisite.plan_version_id == plan_version_id)
+            .where(TaskPrerequisite.plan_id == plan_id)
             .order_by(TaskPrerequisite.id.asc())
         ).all()
     )
@@ -112,12 +95,12 @@ def get_edge(
 def add_edge(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     prerequisite_task_id: int,
 ) -> TaskPrerequisite:
     edge = TaskPrerequisite(
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
         prerequisite_task_id=prerequisite_task_id,
     )
@@ -139,7 +122,7 @@ def list_prerequisite_ids(db: Session, *, task_id: int) -> list[int]:
 def list_prerequisite_statuses(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
 ) -> list[str]:
     return list(
@@ -150,9 +133,9 @@ def list_prerequisite_statuses(
                 TaskPrerequisite.prerequisite_task_id == LearningTask.id,
             )
             .where(
-                TaskPrerequisite.plan_version_id == plan_version_id,
+                TaskPrerequisite.plan_id == plan_id,
                 TaskPrerequisite.task_id == task_id,
-                LearningTask.plan_version_id == plan_version_id,
+                LearningTask.plan_id == plan_id,
             )
             .order_by(TaskPrerequisite.prerequisite_task_id.asc())
         ).all()
@@ -162,7 +145,7 @@ def list_prerequisite_statuses(
 def compare_and_set_task_status(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     expected_status: str,
     target_status: str,
@@ -172,7 +155,7 @@ def compare_and_set_task_status(
         update(LearningTask)
         .where(
             LearningTask.id == task_id,
-            LearningTask.plan_version_id == plan_version_id,
+            LearningTask.plan_id == plan_id,
             LearningTask.status == expected_status,
         )
         .values(

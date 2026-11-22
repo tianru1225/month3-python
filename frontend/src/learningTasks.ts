@@ -57,7 +57,7 @@ export function exampleTaskCatalog(progress: ExampleProgress): Task[] {
     const scheduledDate = localDate(date);
     const result = progress.results[index + 1];
     return {
-      id: index + 1, plan_version_id: 0, position: index + 1,
+      id: index + 1, plan_id: 0, position: index + 1,
       scheduled_date: scheduledDate, title: lesson.title, objective: lesson.objective,
       instructions: "先动手尝试，再提交你的答案或测试结果。",
       steps: [lesson.objective, "整理学习结果并提交证据"], estimated_minutes: lesson.minutes,

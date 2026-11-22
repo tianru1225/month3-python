@@ -31,7 +31,7 @@ export type TaskArchive = { version: 1; selectedId: string | null; sessions: Tas
 export type GuideStep = { title: string; explanation: string; example: string; exercise: string; hint: string };
 
 export const emptyArchive = (): TaskArchive => ({ version: 1, selectedId: null, sessions: [] });
-export const taskKey = (task: Task, source: TaskSource) => `${source}:${task.plan_version_id}:${task.id}`;
+export const taskKey = (task: Task, source: TaskSource) => `${source}:${task.plan_id}:${task.id}`;
 export const taskDisplayId = (task: Task, source: TaskSource) => source === "example" ? `PY-${String(task.id).padStart(3, "0")}` : `#${task.id}`;
 
 const guides: Record<number, GuideStep[]> = {
@@ -116,9 +116,17 @@ export function readTaskArchive(key: string): { archive: TaskArchive; error: str
     for (const session of value.sessions) {
       if (!session) throw new Error("invalid session");
       const task = session.task;
+      // Preserve existing local learning history; migration keeps old version IDs as plan IDs.
+      if (task) {
+        const legacy = task as Task & { plan_version_id?: unknown };
+        if (legacy.plan_id === undefined && Number.isSafeInteger(legacy.plan_version_id)) {
+          legacy.plan_id = legacy.plan_version_id as number;
+          delete legacy.plan_version_id;
+        }
+      }
       if (!session || !task || typeof session.id !== "string" || ids.has(session.id) || !["example", "real"].includes(session.source)
-        || !Number.isSafeInteger(task.id) || task.id < 1 || !Number.isSafeInteger(task.plan_version_id)
-        || (session.source === "example" ? task.plan_version_id !== 0 : task.plan_version_id < 1)
+        || !Number.isSafeInteger(task.id) || task.id < 1 || !Number.isSafeInteger(task.plan_id)
+        || (session.source === "example" ? task.plan_id !== 0 : task.plan_id < 1)
         || [task.title, task.objective, task.instructions, task.deliverable, task.status].some((item) => typeof item !== "string")
         || !Array.isArray(task.steps) || !task.steps.every((item) => typeof item === "string")
         || !Array.isArray(task.acceptance_criteria) || !task.acceptance_criteria.every((item) => typeof item === "string")

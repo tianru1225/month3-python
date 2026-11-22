@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from app.models.evaluation import Evaluation
 from app.models.evidence import Evidence
 from app.models.knowledge import KnowledgeNode
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskStatus
 from app.models.mastery import MasteryRecord, ReviewItem
@@ -16,7 +16,7 @@ from app.models.material import Material
 from app.models.project_material import ProjectMaterialBinding
 from app.models.replan import AuditEvent, ReplanProposal
 from app.models.user import User
-from app.schemas.learning_plan import PlanCreate, PlanVersionCreate
+from app.schemas.learning_plan import PlanCreate
 from app.schemas.learning_task import LearningTaskCreate
 from app.services import (
     evaluation_service,
@@ -98,22 +98,22 @@ def learning_context(client, db_session, tmp_path, monkeypatch):
     assert node_response.status_code == 201
     node_id = node_response.json()["id"]
 
-    plan, version = learning_plan_service.create_plan_with_first_draft(
+    plan = version = learning_plan_service.create_plan(
         db, project_id=project_id, user_id=user.id,
-        payload=PlanCreate(name="Learning plan", goal="Practice", content={}),
+        payload=PlanCreate(content={}),
     )
     task = learning_task_service.create_task(
-        db, plan_version_id=version.id, user_id=user.id, payload=_task_payload(1),
+        db, plan_id=version.id, user_id=user.id, payload=_task_payload(1),
     )
-    learning_plan_service.publish_version(
-        db, plan_id=plan.id, version_id=version.id, user_id=user.id,
+    learning_plan_service.start_plan(
+        db, plan_id=plan.id, user_id=user.id,
     )
     for state in (TaskStatus.READY, TaskStatus.IN_PROGRESS):
         learning_task_service.transition_task_status(
-            db, plan_version_id=version.id, task_id=task.id,
+            db, plan_id=version.id, task_id=task.id,
             user_id=user.id, target_status=state,
         )
-    task_path = f"/plan-versions/{version.id}/tasks/{task.id}"
+    task_path = f"/plans/{version.id}/tasks/{task.id}"
     evidence = client.post(
         task_path + "/evidence", headers=headers,
         json={"evidence_type": "TEXT_ANSWER", "text_content": "A variable holds a value."},
@@ -128,7 +128,7 @@ def learning_context(client, db_session, tmp_path, monkeypatch):
     )
     assert created is True
     proposal, event = replan_service.create_replan_proposal(
-        db, project_id=project_id, user_id=user.id, base_plan_version_id=version.id,
+        db, project_id=project_id, user_id=user.id, base_plan_id=version.id,
         trigger_code="USER_REQUEST", reason="Add practice",
         proposed_content={"goal": "More practice"},
         diff={
@@ -186,7 +186,7 @@ def test_deleted_project_blocks_http_but_keeps_history_and_shared_files(
     materials_path = base + "/materials"
     node_path = base + f"/knowledge-nodes/{c['node_id']}"
     today_path = (
-        base + f"/plan-versions/{c['version_id']}/today-tasks?target_date=2026-10-28"
+        base + f"/plans/{c['version_id']}/today-tasks?target_date=2026-10-28"
     )
     before_tasks = client.get(today_path, headers=headers)
     assert before_tasks.status_code == 200
@@ -195,7 +195,7 @@ def test_deleted_project_blocks_http_but_keeps_history_and_shared_files(
     assert client.get(node_path, headers=headers).status_code == 200
     models = (
         LearningProject, Material, ProjectMaterialBinding,
-        KnowledgeNode, LearningPlan, PlanVersion, LearningTask,
+        KnowledgeNode, LearningPlan, LearningTask,
         Evidence, Evaluation, MasteryRecord, ReviewItem, ReplanProposal, AuditEvent,
     )
     before_counts = [
@@ -245,13 +245,13 @@ def test_deleted_project_blocks_service_access_by_old_related_ids(
     owner = {"user_id": c["user_id"]}
     project = {**owner, "project_id": c["project_id"]}
     plan = {**owner, "plan_id": c["plan_id"]}
-    version = {**owner, "plan_version_id": c["version_id"]}
+    version = {**owner, "plan_id": c["version_id"]}
     evaluation = {**owner, "evaluation_id": c["evaluation_id"]}
     mastery = {**project, "knowledge_node_id": c["node_id"]}
     proposal = {**owner, "proposal_id": c["proposal_id"]}
 
-    assert learning_plan_service.get_current_published_version(db, **plan).id == c["version_id"]
-    assert learning_task_service.list_version_tasks(db, **version)[0].id == c["task_id"]
+    assert learning_plan_service.get_plan(db, **plan).id == c["version_id"]
+    assert learning_task_service.list_plan_tasks(db, **version)[0].id == c["task_id"]
     assert evaluation_service.get_evaluation(db, **evaluation).id == c["evaluation_id"]
     assert mastery_service.get_mastery_history(db, **mastery)[0].id == c["record_id"]
     assert mastery_service.list_review_items(db, **project)[0].id == c["review_id"]
@@ -263,20 +263,12 @@ def test_deleted_project_blocks_service_access_by_old_related_ids(
     ).status_code == 204
     operations = [
         partial(
-            learning_plan_service.create_plan_with_first_draft, db, **project,
-            payload=PlanCreate(name="Rejected", goal="No new plan", content={}),
+            learning_plan_service.create_plan, db, **project,
+            payload=PlanCreate(content={}),
         ),
-        partial(learning_plan_service.list_plan_versions, db, **plan),
-        partial(learning_plan_service.get_current_published_version, db, **plan),
-        partial(
-            learning_plan_service.create_next_draft, db, **plan,
-            payload=PlanVersionCreate(goal="No new version", content={}),
-        ),
-        partial(
-            learning_plan_service.publish_version, db, **plan,
-            version_id=c["version_id"],
-        ),
-        partial(learning_task_service.list_version_tasks, db, **version),
+        partial(learning_plan_service.get_plan, db, **plan),
+        partial(learning_plan_service.start_plan, db, **plan),
+        partial(learning_task_service.list_plan_tasks, db, **version),
         partial(
             learning_task_service.create_task, db, **version, payload=_task_payload(2),
         ),
@@ -308,7 +300,7 @@ def test_deleted_project_blocks_service_access_by_old_related_ids(
         ),
         partial(
             replan_service.create_replan_proposal, db, **project,
-            base_plan_version_id=c["version_id"], trigger_code="USER_REQUEST",
+            base_plan_id=c["version_id"], trigger_code="USER_REQUEST",
             reason="Rejected", proposed_content={}, diff={},
         ),
     ]

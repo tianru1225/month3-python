@@ -5,7 +5,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.evaluation import EvaluationDecision
-from app.models.learning_plan import PlanVersionStatus
 from app.models.learning_task import TaskStatus
 from app.models.mastery import (
     MasteryLevel,
@@ -134,11 +133,11 @@ def record_evaluation_mastery(
             status.HTTP_404_NOT_FOUND,
         )
 
-    evaluation, _, task, version, project = context
-    if version.status != PlanVersionStatus.PUBLISHED.value or not version.is_current:
+    evaluation, _, task, plan, project = context
+    if plan.locked_at is None:
         raise _error(
-            "PLAN_VERSION_NOT_ACTIVE",
-            "mastery requires the current published plan version",
+            "PLAN_NOT_STARTED",
+            "mastery requires the started plan",
             status.HTTP_409_CONFLICT,
         )
     if evaluation.final_decision is None or evaluation.finalized_at is None:

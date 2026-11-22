@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.evidence import Evidence
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_task import LearningTask, TaskStatus
 from app.models.user import User
 from app.schemas.learning_plan import PlanCreate
@@ -32,7 +32,7 @@ def context(
     username: str,
     *,
     activate: bool = True,
-) -> tuple[dict[str, str], User, LearningPlan, PlanVersion, LearningTask]:
+) -> tuple[dict[str, str], User, LearningPlan, LearningTask]:
     headers = login(client, username)
     project_response = client.post(
         "/projects",
@@ -44,19 +44,17 @@ def context(
     assert project_response.status_code == 201
     user = db.scalar(select(User).where(User.username == username))
     assert user is not None
-    plan, version = learning_plan_service.create_plan_with_first_draft(
+    plan = version = learning_plan_service.create_plan(
         db,
         project_id=project_response.json()["id"],
         user_id=user.id,
         payload=PlanCreate(
-            name=f"{username} plan",
-            goal="submit evidence",
             content={},
         ),
     )
     task = learning_task_service.create_task(
         db,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=LearningTaskCreate(
             position=1,
@@ -70,13 +68,13 @@ def context(
         ),
     )
     if activate:
-        learning_plan_service.publish_version(
-            db, plan_id=plan.id, version_id=version.id, user_id=user.id
+        learning_plan_service.start_plan(
+            db, plan_id=plan.id, user_id=user.id
         )
         for target in (TaskStatus.READY, TaskStatus.IN_PROGRESS):
             task = learning_task_service.transition_task_status(
                 db,
-                plan_version_id=version.id,
+                plan_id=version.id,
                 task_id=task.id,
                 user_id=user.id,
                 target_status=target,
@@ -92,7 +90,7 @@ def submit(
     payload: dict[str, object],
 ):
     return client.post(
-        f"/plan-versions/{version_id}/tasks/{task_id}/evidence",
+        f"/plans/{version_id}/tasks/{task_id}/evidence",
         headers=headers,
         json=payload,
     )
@@ -105,7 +103,7 @@ def evaluate(
     task_id: int,
 ):
     return client.post(
-        f"/plan-versions/{version_id}/tasks/{task_id}/evaluate",
+        f"/plans/{version_id}/tasks/{task_id}/evaluate",
         headers=headers,
     )
 
@@ -154,7 +152,7 @@ def test_test_report_failure_then_success(
 
     learning_task_service.transition_task_status(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         target_status=TaskStatus.IN_PROGRESS,
@@ -204,7 +202,7 @@ def test_retry_keeps_first_attempt(client: TestClient, db_session: Session) -> N
     )
     learning_task_service.transition_task_status(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         target_status=TaskStatus.IN_PROGRESS,
@@ -245,12 +243,10 @@ def test_draft_and_ready_reject_evidence(
         {"evidence_type": "TEXT_ANSWER", "text_content": "too early"},
     )
     assert draft.status_code == 409
-    assert draft.json()["detail"]["code"] == "PLAN_VERSION_NOT_ACTIVE"
-    learning_plan_service.publish_version(
+    assert draft.json()["detail"]["code"] == "PLAN_NOT_STARTED"
+    learning_plan_service.start_plan(
         db_session,
-        plan_id=version.plan_id,
-        version_id=version.id,
-        user_id=user.id,
+        plan_id=version.id, user_id=user.id,
     )
     ready = submit(
         client,
@@ -371,7 +367,7 @@ def test_authentication_and_ownership(client: TestClient, db_session: Session) -
         {"evidence_type": "TEXT_ANSWER", "text_content": "cross user"},
     )
     assert outsider.status_code == 404
-    assert outsider.json()["detail"]["code"] == "PLAN_VERSION_NOT_FOUND"
+    assert outsider.json()["detail"]["code"] == "PLAN_NOT_FOUND"
     assert (
         submit(
             client,

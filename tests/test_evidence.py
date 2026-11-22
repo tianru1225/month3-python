@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.evidence import Evidence, EvidenceSourceKind, EvidenceType
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskStatus
 from app.models.user import User
@@ -19,7 +19,7 @@ from app.schemas.evidence import (
     TestReportEvidenceCreate as EvidenceTestReportCreate,
     TextEvidenceCreate,
 )
-from app.schemas.learning_plan import PlanCreate, PlanVersionCreate
+from app.schemas.learning_plan import PlanCreate
 from app.schemas.learning_task import LearningTaskCreate
 from app.services import (
     evidence_service,
@@ -31,7 +31,7 @@ from app.services import (
 def _context(
     db_session: Session,
     username: str,
-) -> tuple[User, LearningProject, LearningPlan, PlanVersion, LearningTask]:
+) -> tuple[User, LearningProject, LearningPlan, LearningPlan, LearningTask]:
     user = User(username=username, password_hash="day136-test-placeholder")
     db_session.add(user)
     db_session.flush()
@@ -43,19 +43,17 @@ def _context(
     db_session.commit()
     db_session.refresh(user)
     db_session.refresh(project)
-    plan, version = learning_plan_service.create_plan_with_first_draft(
+    plan = version = learning_plan_service.create_plan(
         db_session,
         project_id=project.id,
         user_id=user.id,
         payload=PlanCreate(
-            name=f"{username} plan",
-            goal="submit evidence",
             content={},
         ),
     )
     task = learning_task_service.create_task(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=LearningTaskCreate(
             position=1,
@@ -76,19 +74,17 @@ def _activate(
     *,
     user: User,
     plan: LearningPlan,
-    version: PlanVersion,
+    version: LearningPlan,
     task: LearningTask,
 ) -> LearningTask:
-    learning_plan_service.publish_version(
+    learning_plan_service.start_plan(
         db_session,
-        plan_id=plan.id,
-        version_id=version.id,
-        user_id=user.id,
+        plan_id=plan.id, user_id=user.id,
     )
     for target in (TaskStatus.READY, TaskStatus.IN_PROGRESS):
         task = learning_task_service.transition_task_status(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             user_id=user.id,
             target_status=target,
@@ -158,7 +154,7 @@ def test_submit_text_evidence_appends_and_submits_task(db_session: Session) -> N
 
     evidence = evidence_service.submit_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         payload=TextEvidenceCreate(text_content="  My answer  "),
@@ -188,7 +184,7 @@ def test_submit_structured_report_preserves_automation_source(
 
     evidence = evidence_service.submit_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         payload=EvidenceTestReportCreate(test_report=_report()),
@@ -218,7 +214,7 @@ def test_revision_submission_appends_second_attempt(db_session: Session) -> None
     )
     first = evidence_service.submit_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         payload=TextEvidenceCreate(text_content="first answer"),
@@ -227,14 +223,14 @@ def test_revision_submission_appends_second_attempt(db_session: Session) -> None
     for target in (TaskStatus.REVISION_REQUIRED, TaskStatus.IN_PROGRESS):
         task = learning_task_service.transition_task_status(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             user_id=user.id,
             target_status=target,
         )
     second = evidence_service.submit_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         payload=TextEvidenceCreate(text_content="revised answer"),
@@ -243,7 +239,7 @@ def test_revision_submission_appends_second_attempt(db_session: Session) -> None
 
     history = evidence_service.list_task_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
     )
@@ -255,75 +251,18 @@ def test_revision_submission_appends_second_attempt(db_session: Session) -> None
     ]
 
 
-def test_wrong_status_and_inactive_version_reject_submission(
-    db_session: Session,
-) -> None:
-    user, _, plan, version, task = _context(db_session, "day136-status")
-    with pytest.raises(HTTPException) as draft_error:
-        evidence_service.submit_evidence(
-            db_session,
-            plan_version_id=version.id,
-            task_id=task.id,
-            user_id=user.id,
-            payload=TextEvidenceCreate(text_content="too early"),
-            source=EvidenceSourceContext(kind=EvidenceSourceKind.USER),
-        )
-    assert draft_error.value.detail["code"] == "PLAN_VERSION_NOT_ACTIVE"
-
-    learning_plan_service.publish_version(
-        db_session,
-        plan_id=plan.id,
-        version_id=version.id,
-        user_id=user.id,
-    )
-    with pytest.raises(HTTPException) as ready_error:
-        evidence_service.submit_evidence(
-            db_session,
-            plan_version_id=version.id,
-            task_id=task.id,
-            user_id=user.id,
-            payload=TextEvidenceCreate(text_content="still too early"),
-            source=EvidenceSourceContext(kind=EvidenceSourceKind.USER),
-        )
-    assert ready_error.value.detail["code"] == "TASK_NOT_ACCEPTING_EVIDENCE"
-
-    task = learning_task_service.transition_task_status(
-        db_session,
-        plan_version_id=version.id,
-        task_id=task.id,
-        user_id=user.id,
-        target_status=TaskStatus.READY,
-    )
-    task = learning_task_service.transition_task_status(
-        db_session,
-        plan_version_id=version.id,
-        task_id=task.id,
-        user_id=user.id,
-        target_status=TaskStatus.IN_PROGRESS,
-    )
-    replacement = learning_plan_service.create_next_draft(
-        db_session,
-        plan_id=plan.id,
-        user_id=user.id,
-        payload=PlanVersionCreate(goal="replacement", content={}),
-    )
-    learning_plan_service.publish_version(
-        db_session,
-        plan_id=plan.id,
-        version_id=replacement.id,
-        user_id=user.id,
-    )
-    with pytest.raises(HTTPException) as inactive_error:
-        evidence_service.submit_evidence(
-            db_session,
-            plan_version_id=version.id,
-            task_id=task.id,
-            user_id=user.id,
-            payload=TextEvidenceCreate(text_content="old version"),
-            source=EvidenceSourceContext(kind=EvidenceSourceKind.USER),
-        )
-    assert inactive_error.value.detail["code"] == "PLAN_VERSION_NOT_ACTIVE"
-
+def test_unstarted_plan_and_wrong_task_status_reject_submission(db_session: Session) -> None:
+    user, _, _, plan, task = _context(db_session, "evidence-state")
+    for started, expected in ((False, "PLAN_NOT_STARTED"), (True, "TASK_NOT_ACCEPTING_EVIDENCE")):
+        if started:
+            learning_plan_service.start_plan(db_session, plan_id=plan.id, user_id=user.id)
+        with pytest.raises(HTTPException) as error:
+            evidence_service.submit_evidence(
+                db_session, plan_id=plan.id, task_id=task.id, user_id=user.id,
+                payload=TextEvidenceCreate(text_content="too early"),
+                source=EvidenceSourceContext(kind=EvidenceSourceKind.USER),
+            )
+        assert error.value.detail["code"] == expected
 
 def test_owner_and_task_scope_are_hidden(db_session: Session) -> None:
     owner, _, plan, version, task = _context(db_session, "day136-owner")
@@ -339,19 +278,19 @@ def test_owner_and_task_scope_are_hidden(db_session: Session) -> None:
     with pytest.raises(HTTPException) as owner_error:
         evidence_service.submit_evidence(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             user_id=other.id,
             payload=TextEvidenceCreate(text_content="forbidden"),
             source=EvidenceSourceContext(kind=EvidenceSourceKind.USER),
         )
     assert owner_error.value.status_code == 404
-    assert owner_error.value.detail["code"] == "PLAN_VERSION_NOT_FOUND"
+    assert owner_error.value.detail["code"] == "PLAN_NOT_FOUND"
 
     with pytest.raises(HTTPException) as task_error:
         evidence_service.list_task_evidence(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id + 100_000,
             user_id=owner.id,
         )
@@ -382,7 +321,7 @@ def test_transition_failure_rolls_back_evidence(
     with pytest.raises(HTTPException):
         evidence_service.submit_evidence(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             user_id=user.id,
             payload=TextEvidenceCreate(text_content="must roll back"),
@@ -392,7 +331,7 @@ def test_transition_failure_rolls_back_evidence(
     assert (
         evidence_service.list_task_evidence(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             user_id=user.id,
         )
@@ -408,7 +347,7 @@ def test_database_constraints_reject_invalid_payload_source_and_attempt(
     user, _, _, version, task = _context(db_session, "day136-db")
     invalid_rows = [
         Evidence(
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             attempt_number=0,
             evidence_type=EvidenceType.TEXT_ANSWER.value,
@@ -417,7 +356,7 @@ def test_database_constraints_reject_invalid_payload_source_and_attempt(
             submitted_by_user_id=user.id,
         ),
         Evidence(
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             attempt_number=1,
             evidence_type=EvidenceType.TEXT_ANSWER.value,
@@ -427,7 +366,7 @@ def test_database_constraints_reject_invalid_payload_source_and_attempt(
             submitted_by_user_id=user.id,
         ),
         Evidence(
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             attempt_number=1,
             evidence_type=EvidenceType.TEST_REPORT.value,
@@ -458,8 +397,8 @@ def test_composite_foreign_key_encodes_same_version_rule() -> None:
         for constraint in constraints
     }
     assert (
-        ("task_id", "plan_version_id"),
-        ("learning_tasks.id", "learning_tasks.plan_version_id"),
+        ("task_id", "plan_id"),
+        ("learning_tasks.id", "learning_tasks.plan_id"),
     ) in pairs
 
 
@@ -468,7 +407,7 @@ def test_database_rejects_duplicate_attempt(
 ) -> None:
     user, _, _, version, task = _context(db_session, "day136-duplicate")
     first = Evidence(
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         attempt_number=1,
         evidence_type=EvidenceType.TEXT_ANSWER.value,
@@ -480,7 +419,7 @@ def test_database_rejects_duplicate_attempt(
     db_session.commit()
 
     duplicate = Evidence(
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         attempt_number=1,
         evidence_type=EvidenceType.TEXT_ANSWER.value,

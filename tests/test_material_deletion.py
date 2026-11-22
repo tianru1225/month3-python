@@ -153,9 +153,9 @@ def test_bindings_and_learning_history_prevent_permanent_deletion(
         f"/projects/{project_id}/materials/{planned['material_id']}", headers=headers,
     ).status_code == 204
     user = db_session.scalar(select(User).where(User.username == "cleanup-history"))
-    learning_plan_service.create_plan_with_first_draft(
+    learning_plan_service.create_plan(
         db_session, project_id=project_id, user_id=user.id,
-        payload=PlanCreate(name="History", goal="Keep history", content={}),
+        payload=PlanCreate(content={}),
     )
     assert client.delete(f"/projects/{project_id}", headers=headers).status_code == 204
     rejected = client.delete(f"/materials/{planned['material_id']}", headers=headers)
@@ -237,9 +237,9 @@ def test_partial_cleanup_stays_unusable_and_retry_finishes(
     assert client.get(parse_path, headers=headers).status_code == 404
     user = db_session.scalar(select(User).where(User.username == "cleanup-retry"))
     with pytest.raises(HTTPException) as caught:
-        learning_plan_service.create_plan_with_first_draft(
+        learning_plan_service.create_plan(
             db_session, project_id=project_id, user_id=user.id,
-            payload=PlanCreate(name="Wait", goal="Wait for cleanup", content={}),
+            payload=PlanCreate(content={}),
         )
     assert caught.value.status_code == 409
     assert client.delete(f"/materials/{item['material_id']}", headers=headers).status_code == 204

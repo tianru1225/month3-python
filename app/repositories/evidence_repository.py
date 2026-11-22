@@ -14,7 +14,7 @@ def next_attempt_number(db: Session, *, task_id: int) -> int:
 def add_evidence(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     attempt_number: int,
     evidence_type: str,
@@ -25,7 +25,7 @@ def add_evidence(
     submitted_by_user_id: int,
 ) -> Evidence:
     evidence = Evidence(
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
         attempt_number=attempt_number,
         evidence_type=evidence_type,

@@ -1,39 +1,21 @@
 from datetime import datetime, timezone
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.learning_plan import (
-    LearningPlan,
-    PlanVersion,
-    PlanVersionStatus,
-)
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.material import Material
 from app.models.project_material import ProjectMaterialBinding
 from app.repositories.learning_plan_repository import (
-    add_plan,
-    add_version,
-    clear_current_version,
-    get_current_version,
-    get_next_version_number,
-    get_owned_plan,
-    get_owned_version,
-    list_versions,
+    add_plan, get_owned_plan, get_project_plan,
 )
-from app.schemas.learning_plan import PlanCreate, PlanReject, PlanVersionCreate
+from app.schemas.learning_plan import PlanCreate
 
 
 def _error(code: str, message: str, status_code: int) -> HTTPException:
-    return HTTPException(
-        status_code=status_code,
-        detail={"code": code, "message": message},
-    )
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
 
 def _require_project_owner(
@@ -44,10 +26,8 @@ def _require_project_owner(
         .with_for_update().execution_options(populate_existing=True)
     )
     if project is None or project.user_id != user_id or project.deleted_at is not None:
-        raise _error(
-            "PROJECT_NOT_FOUND", "project not found", status.HTTP_404_NOT_FOUND
-        )
-    pending_material = db.scalar(
+        raise _error("PROJECT_NOT_FOUND", "project not found", 404)
+    pending = db.scalar(
         select(Material.id)
         .join(ProjectMaterialBinding, ProjectMaterialBinding.material_id == Material.id)
         .where(
@@ -55,141 +35,49 @@ def _require_project_owner(
             Material.deletion_started_at.is_not(None),
         ).limit(1)
     )
-    if pending_material is not None:
-        raise _error(
-            "MATERIAL_CLEANUP_PENDING",
-            "finish pending material cleanup before creating a plan",
-            status.HTTP_409_CONFLICT,
-        )
+    if pending is not None:
+        raise _error("MATERIAL_CLEANUP_PENDING", "finish pending material cleanup", 409)
     return project
 
 
-def create_plan_with_first_draft(
+def create_plan(
     db: Session, *, project_id: int, user_id: int, payload: PlanCreate
-) -> tuple[LearningPlan, PlanVersion]:
-    _require_project_owner(db, project_id=project_id, user_id=user_id)
+) -> LearningPlan:
+    # Internal creation primitive; model generation and atomic replacement follow later.
     try:
-        plan = add_plan(db, project_id=project_id, name=payload.name)
-        version = add_version(
-            db,
-            plan_id=plan.id,
-            version_number=1,
-            goal=payload.goal,
-            content=payload.content,
-            source_kind=payload.source_kind.value,
-            provider_name=payload.provider_name,
-            model_name=payload.model_name,
+        _require_project_owner(db, project_id=project_id, user_id=user_id)
+        if get_project_plan(db, project_id=project_id) is not None:
+            raise _error("PROJECT_PLAN_EXISTS", "project already has a plan", 409)
+        plan = add_plan(
+            db, project_id=project_id, content=payload.content,
+            provider_name=payload.provider_name, model_name=payload.model_name,
         )
         db.commit()
         db.refresh(plan)
-        db.refresh(version)
-        return plan, version
+        return plan
     except Exception:
         db.rollback()
         raise
 
 
-def create_next_draft(
-    db: Session, *, plan_id: int, user_id: int, payload: PlanVersionCreate
-) -> PlanVersion:
+def get_plan(db: Session, *, plan_id: int, user_id: int) -> LearningPlan:
     plan = get_owned_plan(db, plan_id=plan_id, user_id=user_id)
     if plan is None:
-        raise _error("PLAN_NOT_FOUND", "plan not found", status.HTTP_404_NOT_FOUND)
+        raise _error("PLAN_NOT_FOUND", "plan not found", 404)
+    return plan
+
+
+def start_plan(db: Session, *, plan_id: int, user_id: int) -> LearningPlan:
+    # Internal lock operation. Browser entry and generation races are the next card.
     try:
-        version = add_version(
-            db,
-            plan_id=plan.id,
-            version_number=get_next_version_number(db, plan_id=plan.id),
-            goal=payload.goal,
-            content=payload.content,
-            source_kind=payload.source_kind.value,
-            provider_name=payload.provider_name,
-            model_name=payload.model_name,
-        )
+        plan = get_owned_plan(db, plan_id=plan_id, user_id=user_id, lock=True)
+        if plan is None:
+            raise _error("PLAN_NOT_FOUND", "plan not found", 404)
+        if plan.locked_at is None:
+            plan.locked_at = datetime.now(timezone.utc)
         db.commit()
-        db.refresh(version)
-        return version
+        db.refresh(plan)
+        return plan
     except Exception:
         db.rollback()
         raise
-
-
-def publish_version(
-    db: Session, *, plan_id: int, version_id: int, user_id: int
-) -> PlanVersion:
-    plan = get_owned_plan(db, plan_id=plan_id, user_id=user_id)
-    version = get_owned_version(db, version_id=version_id, user_id=user_id)
-    if plan is None or version is None or version.plan_id != plan.id:
-        raise _error(
-            "PLAN_VERSION_NOT_FOUND",
-            "plan version not found",
-            status.HTTP_404_NOT_FOUND,
-        )
-    if version.status != PlanVersionStatus.DRAFT.value:
-        raise _error(
-            "PLAN_VERSION_IMMUTABLE",
-            "only a draft plan version can be published",
-            status.HTTP_409_CONFLICT,
-        )
-    try:
-        clear_current_version(db, plan_id=plan.id)
-        version.status = PlanVersionStatus.PUBLISHED.value
-        version.is_current = True
-        version.published_at = _now()
-        version.confirmed_by_user_id = user_id
-        db.commit()
-        db.refresh(version)
-        return version
-    except Exception:
-        db.rollback()
-        raise
-
-
-def reject_draft(
-    db: Session,
-    *,
-    plan_id: int,
-    version_id: int,
-    user_id: int,
-    payload: PlanReject,
-) -> PlanVersion:
-    plan = get_owned_plan(db, plan_id=plan_id, user_id=user_id)
-    version = get_owned_version(db, version_id=version_id, user_id=user_id)
-    if plan is None or version is None or version.plan_id != plan.id:
-        raise _error(
-            "PLAN_VERSION_NOT_FOUND",
-            "plan version not found",
-            status.HTTP_404_NOT_FOUND,
-        )
-    if version.status != PlanVersionStatus.DRAFT.value:
-        raise _error(
-            "PLAN_VERSION_IMMUTABLE",
-            "only a draft plan version can be rejected",
-            status.HTTP_409_CONFLICT,
-        )
-    try:
-        version.status = PlanVersionStatus.REJECTED.value
-        version.rejection_reason = payload.reason
-        version.is_current = False
-        db.commit()
-        db.refresh(version)
-        return version
-    except Exception:
-        db.rollback()
-        raise
-
-
-def get_current_published_version(
-    db: Session, *, plan_id: int, user_id: int
-) -> PlanVersion | None:
-    plan = get_owned_plan(db, plan_id=plan_id, user_id=user_id)
-    if plan is None:
-        raise _error("PLAN_NOT_FOUND", "plan not found", status.HTTP_404_NOT_FOUND)
-    return get_current_version(db, plan_id=plan.id)
-
-
-def list_plan_versions(db: Session, *, plan_id: int, user_id: int) -> list[PlanVersion]:
-    plan = get_owned_plan(db, plan_id=plan_id, user_id=user_id)
-    if plan is None:
-        raise _error("PLAN_NOT_FOUND", "plan not found", status.HTTP_404_NOT_FOUND)
-    return list_versions(db, plan_id=plan.id)

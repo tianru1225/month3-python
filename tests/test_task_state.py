@@ -7,12 +7,12 @@ from app.core.task_state import (
     allowed_task_status_targets,
     require_task_status_transition,
 )
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskStatus
 from app.models.user import User
 from app.repositories.learning_task_repository import compare_and_set_task_status
-from app.schemas.learning_plan import PlanCreate, PlanVersionCreate
+from app.schemas.learning_plan import PlanCreate
 from app.schemas.learning_task import LearningTaskCreate
 from app.services import learning_plan_service, learning_task_service
 
@@ -37,7 +37,7 @@ INVALID_TRANSITIONS = [
 def _context(
     db_session: Session,
     username: str,
-) -> tuple[User, LearningProject, LearningPlan, PlanVersion]:
+) -> tuple[User, LearningProject, LearningPlan, LearningPlan]:
     user = User(username=username, password_hash="day135-test-placeholder")
     db_session.add(user)
     db_session.flush()
@@ -49,13 +49,11 @@ def _context(
     db_session.commit()
     db_session.refresh(user)
     db_session.refresh(project)
-    plan, version = learning_plan_service.create_plan_with_first_draft(
+    plan = version = learning_plan_service.create_plan(
         db_session,
         project_id=project.id,
         user_id=user.id,
         payload=PlanCreate(
-            name=f"{username} plan",
-            goal="complete the state machine",
             content={},
         ),
     )
@@ -84,7 +82,7 @@ def _task(
 ) -> LearningTask:
     return learning_task_service.create_task(
         db_session,
-        plan_version_id=version_id,
+        plan_id=version_id,
         user_id=user_id,
         payload=_payload(position),
     )
@@ -96,12 +94,10 @@ def _publish(
     plan_id: int,
     version_id: int,
     user_id: int,
-) -> PlanVersion:
-    return learning_plan_service.publish_version(
+) -> LearningPlan:
+    return learning_plan_service.start_plan(
         db_session,
-        plan_id=plan_id,
-        version_id=version_id,
-        user_id=user_id,
+        plan_id=plan_id, user_id=user_id,
     )
 
 
@@ -114,7 +110,7 @@ def _transition(
 ) -> LearningTask:
     return learning_task_service.transition_task_status(
         db_session,
-        plan_version_id=task.plan_version_id,
+        plan_id=task.plan_id,
         task_id=task.id,
         user_id=user_id,
         target_status=target,
@@ -228,60 +224,13 @@ def test_revision_path_and_same_status_are_idempotent(db_session: Session) -> No
     assert same.completed_at == first_completed_at
 
 
-def test_draft_and_inactive_published_versions_cannot_run(db_session: Session) -> None:
-    user, _, plan, first_version = _context(db_session, "day135-active")
-    old_task = _task(
-        db_session,
-        version_id=first_version.id,
-        user_id=user.id,
-        position=1,
-    )
-
-    with pytest.raises(HTTPException) as draft_error:
-        _transition(
-            db_session,
-            task=old_task,
-            user_id=user.id,
-            target=TaskStatus.READY,
-        )
-    assert draft_error.value.status_code == 409
-    assert draft_error.value.detail["code"] == "PLAN_VERSION_NOT_ACTIVE"
-
-    _publish(
-        db_session,
-        plan_id=plan.id,
-        version_id=first_version.id,
-        user_id=user.id,
-    )
-    second_version = learning_plan_service.create_next_draft(
-        db_session,
-        plan_id=plan.id,
-        user_id=user.id,
-        payload=PlanVersionCreate(goal="replacement", content={}),
-    )
-    _task(
-        db_session,
-        version_id=second_version.id,
-        user_id=user.id,
-        position=1,
-    )
-    _publish(
-        db_session,
-        plan_id=plan.id,
-        version_id=second_version.id,
-        user_id=user.id,
-    )
-
-    with pytest.raises(HTTPException) as inactive_error:
-        _transition(
-            db_session,
-            task=old_task,
-            user_id=user.id,
-            target=TaskStatus.READY,
-        )
-    assert inactive_error.value.status_code == 409
-    assert inactive_error.value.detail["code"] == "PLAN_VERSION_NOT_ACTIVE"
-
+def test_unstarted_plan_cannot_run(db_session: Session) -> None:
+    user, _, _, plan = _context(db_session, "task-unstarted")
+    task = _task(db_session, version_id=plan.id, user_id=user.id, position=1)
+    with pytest.raises(HTTPException) as error:
+        _transition(db_session, task=task, user_id=user.id, target=TaskStatus.READY)
+    assert error.value.detail["code"] == "PLAN_NOT_STARTED"
+    assert task.status == TaskStatus.DRAFT.value
 
 def test_prerequisites_must_pass_before_dependent_is_ready(
     db_session: Session,
@@ -301,7 +250,7 @@ def test_prerequisites_must_pass_before_dependent_is_ready(
     )
     learning_task_service.add_task_prerequisite(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=second.id,
         prerequisite_task_id=first.id,
         user_id=user.id,
@@ -369,12 +318,12 @@ def test_owner_scope_and_task_version_scope_are_hidden(db_session: Session) -> N
             target=TaskStatus.READY,
         )
     assert owner_error.value.status_code == 404
-    assert owner_error.value.detail["code"] == "PLAN_VERSION_NOT_FOUND"
+    assert owner_error.value.detail["code"] == "PLAN_NOT_FOUND"
 
     with pytest.raises(HTTPException) as task_error:
         learning_task_service.transition_task_status(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id + 100_000,
             user_id=owner.id,
             target_status=TaskStatus.READY,
@@ -445,7 +394,7 @@ def test_repository_compare_and_set_rejects_stale_expected_status(
 
     assert compare_and_set_task_status(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         expected_status=TaskStatus.DRAFT.value,
         target_status=TaskStatus.READY.value,
@@ -455,7 +404,7 @@ def test_repository_compare_and_set_rejects_stale_expected_status(
 
     assert not compare_and_set_task_status(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         expected_status=TaskStatus.DRAFT.value,
         target_status=TaskStatus.IN_PROGRESS.value,

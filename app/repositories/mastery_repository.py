@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.evaluation import Evaluation
 from app.models.evidence import Evidence
 from app.models.knowledge import KnowledgeNode
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask
 from app.models.mastery import MasteryRecord, ReviewItem
@@ -16,7 +16,7 @@ EvaluationContext = tuple[
     Evaluation,
     Evidence,
     LearningTask,
-    PlanVersion,
+    LearningPlan,
     LearningProject,
 ]
 
@@ -32,17 +32,16 @@ def get_owned_evaluation_context(
             Evaluation,
             Evidence,
             LearningTask,
-            PlanVersion,
+            LearningPlan,
             LearningProject,
         )
         .join(Evidence, Evidence.id == Evaluation.evidence_id)
         .join(
             LearningTask,
             (LearningTask.id == Evidence.task_id)
-            & (LearningTask.plan_version_id == Evidence.plan_version_id),
+            & (LearningTask.plan_id == Evidence.plan_id),
         )
-        .join(PlanVersion, PlanVersion.id == Evidence.plan_version_id)
-        .join(LearningPlan, LearningPlan.id == PlanVersion.plan_id)
+        .join(LearningPlan, LearningPlan.id == Evidence.plan_id)
         .join(LearningProject, LearningProject.id == LearningPlan.project_id)
         .where(
             Evaluation.id == evaluation_id,
@@ -52,8 +51,8 @@ def get_owned_evaluation_context(
     ).one_or_none()
     if row is None:
         return None
-    evaluation, evidence, task, version, project = row
-    return evaluation, evidence, task, version, project
+    evaluation, evidence, task, plan, project = row
+    return evaluation, evidence, task, plan, project
 
 
 def get_project_node(

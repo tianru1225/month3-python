@@ -29,7 +29,7 @@ def create_replan_proposal(
     *,
     project_id: int,
     user_id: int,
-    base_plan_version_id: int,
+    base_plan_id: int,
     trigger_code: str,
     reason: str,
     proposed_content: dict[str, object],
@@ -41,21 +41,21 @@ def create_replan_proposal(
     ):
         raise _error(404, "PROJECT_NOT_FOUND", "project not found")
 
-    current = replan_repository.get_owned_current_published_version(
+    current = replan_repository.get_owned_started_plan(
         db, project_id=project_id, user_id=user_id
     )
-    if current is None or current.id != base_plan_version_id:
+    if current is None or current.id != base_plan_id:
         raise _error(
             409,
-            "PLAN_VERSION_NOT_ACTIVE",
-            "base plan version is not the current published version",
+            "PLAN_NOT_STARTED",
+            "base plan is not the locked project plan",
         )
 
     try:
         proposal = replan_repository.add_proposal(
             db,
             project_id=project_id,
-            base_plan_version_id=base_plan_version_id,
+            base_plan_id=base_plan_id,
             created_by_user_id=user_id,
             trigger_code=trigger_code,
             reason=reason,
@@ -69,7 +69,7 @@ def create_replan_proposal(
             actor_user_id=user_id,
             event_type=AuditEventType.PROPOSAL_CREATED.value,
             payload={
-                "base_plan_version_id": base_plan_version_id,
+                "base_plan_id": base_plan_id,
                 "trigger_code": trigger_code,
                 "reason": reason,
                 "diff": diff,
@@ -154,7 +154,7 @@ def _decide(
             payload={
                 "status": status.value,
                 "decision_note": decision_note,
-                "base_plan_version_id": proposal.base_plan_version_id,
+                "base_plan_id": proposal.base_plan_id,
             },
         )
         db.commit()

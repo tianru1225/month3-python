@@ -10,8 +10,6 @@ from app.models.evidence import Evidence, EvidenceSourceKind, EvidenceType
 from app.models.evaluation import Evaluation, EvaluationDecision, RuleEvaluationStatus
 from app.models.learning_plan import (
     LearningPlan,
-    PlanVersion,
-    PlanVersionStatus,
 )
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskStatus
@@ -36,7 +34,7 @@ from app.services import (
 def _context(
     db_session: Session,
     username: str,
-) -> tuple[User, LearningProject, LearningPlan, PlanVersion, LearningTask]:
+) -> tuple[User, LearningProject, LearningPlan, LearningPlan, LearningTask]:
     user = User(username=username, password_hash="day137-test-placeholder")
     db_session.add(user)
     db_session.flush()
@@ -50,19 +48,17 @@ def _context(
     db_session.refresh(user)
     db_session.refresh(project)
 
-    plan, version = learning_plan_service.create_plan_with_first_draft(
+    plan = version = learning_plan_service.create_plan(
         db_session,
         project_id=project.id,
         user_id=user.id,
         payload=PlanCreate(
-            name=f"{username} plan",
-            goal="evaluate submitted evidence",
             content={},
         ),
     )
     task = learning_task_service.create_task(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=LearningTaskCreate(
             position=1,
@@ -83,19 +79,17 @@ def _activate(
     *,
     user: User,
     plan: LearningPlan,
-    version: PlanVersion,
+    version: LearningPlan,
     task: LearningTask,
 ) -> LearningTask:
-    learning_plan_service.publish_version(
+    learning_plan_service.start_plan(
         db_session,
-        plan_id=plan.id,
-        version_id=version.id,
-        user_id=user.id,
+        plan_id=plan.id, user_id=user.id,
     )
     for target in (TaskStatus.READY, TaskStatus.IN_PROGRESS):
         task = learning_task_service.transition_task_status(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=task.id,
             user_id=user.id,
             target_status=target,
@@ -106,7 +100,7 @@ def _activate(
 def _submitted_context(
     db_session: Session,
     username: str,
-) -> tuple[User, LearningProject, LearningPlan, PlanVersion, LearningTask, Evidence]:
+) -> tuple[User, LearningProject, LearningPlan, LearningPlan, LearningTask, Evidence]:
     user, project, plan, version, task = _context(db_session, username)
     task = _activate(
         db_session,
@@ -117,7 +111,7 @@ def _submitted_context(
     )
     evidence = evidence_service.submit_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         payload=TextEvidenceCreate(text_content="answer for evaluation"),
@@ -195,7 +189,7 @@ def test_create_evaluation_starts_without_model_or_human_decision(
     assert evaluation.human_decision is None
     assert evaluation.final_decision is None
     assert task.status == TaskStatus.SUBMITTED.value
-    assert version.status == PlanVersionStatus.PUBLISHED.value
+    assert version.locked_at is not None
 
 
 def test_duplicate_evaluation_is_rejected(db_session: Session) -> None:
@@ -487,21 +481,21 @@ def test_old_attempt_cannot_be_evaluated(db_session: Session) -> None:
     )
     learning_task_service.transition_task_status(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         target_status=TaskStatus.REVISION_REQUIRED,
     )
     task = learning_task_service.transition_task_status(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         target_status=TaskStatus.IN_PROGRESS,
     )
     second = evidence_service.submit_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         payload=TextEvidenceCreate(text_content="second answer"),
@@ -522,22 +516,20 @@ def test_old_attempt_cannot_be_evaluated(db_session: Session) -> None:
 
 def test_non_submitted_task_cannot_be_evaluated(db_session: Session) -> None:
     user, _, plan, version, task = _context(db_session, "day137-not-submitted")
-    learning_plan_service.publish_version(
+    learning_plan_service.start_plan(
         db_session,
-        plan_id=plan.id,
-        version_id=version.id,
-        user_id=user.id,
+        plan_id=plan.id, user_id=user.id,
     )
     task = learning_task_service.transition_task_status(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         user_id=user.id,
         target_status=TaskStatus.READY,
     )
     evidence = add_evidence(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=task.id,
         attempt_number=1,
         evidence_type=EvidenceType.TEXT_ANSWER.value,
@@ -561,40 +553,16 @@ def test_non_submitted_task_cannot_be_evaluated(db_session: Session) -> None:
     _assert_error(error, code="EVIDENCE_NOT_SUBMITTED")
 
 
-def test_non_current_version_cannot_be_evaluated(db_session: Session) -> None:
-    user, _, plan, old_version, task, evidence = _submitted_context(
-        db_session,
-        "day137-old-version",
-    )
-    new_version = learning_plan_service.create_next_draft(
-        db_session,
-        plan_id=plan.id,
-        user_id=user.id,
-        payload=PlanCreate(
-            name="unused",
-            goal="new version",
-            content={},
-        ),
-    )
-    assert new_version.status == PlanVersionStatus.DRAFT.value
-    learning_plan_service.publish_version(
-        db_session,
-        plan_id=plan.id,
-        version_id=new_version.id,
-        user_id=user.id,
-    )
-
+def test_unstarted_plan_cannot_be_evaluated(db_session: Session) -> None:
+    user, _, _, plan, _, evidence = _submitted_context(db_session, "unstarted-evaluation")
+    plan.locked_at = None
+    db_session.commit()
     with pytest.raises(HTTPException) as error:
         evaluation_service.create_evaluation(
-            db_session,
-            evidence_id=evidence.id,
-            user_id=user.id,
+            db_session, evidence_id=evidence.id, user_id=user.id,
             payload=_rule_payload(evidence.id),
         )
-
-    _assert_error(error, code="PLAN_VERSION_NOT_ACTIVE")
-    assert old_version.is_current is False
-
+    _assert_error(error, code="PLAN_NOT_STARTED")
 
 def test_unauthorized_user_cannot_read_or_write_evaluation(
     db_session: Session,

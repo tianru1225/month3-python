@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 
 from app.models.user import User
-from app.schemas.learning_plan import PlanCreate, PlanVersionCreate
+from app.schemas.learning_plan import PlanCreate
 from app.schemas.learning_task import LearningTaskCreate
 from app.services import learning_plan_service, learning_task_service
 
@@ -48,40 +48,40 @@ def _context(client, db, username: str):
     ).json()
     user = db.scalar(select(User).where(User.username == username))
     assert user is not None
-    plan, version = learning_plan_service.create_plan_with_first_draft(
+    plan = version = learning_plan_service.create_plan(
         db,
         project_id=project["id"],
         user_id=user.id,
-        payload=PlanCreate(name="Day143 plan", goal="query tasks", content={}),
+        payload=PlanCreate(content={}),
     )
     start = date(2026, 9, 28)
     first = learning_task_service.create_task(
         db,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=_payload(1, start),
     )
     second = learning_task_service.create_task(
         db,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=_payload(2, start),
     )
     third = learning_task_service.create_task(
         db,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=_payload(3, start + timedelta(days=1)),
     )
     learning_task_service.add_task_prerequisite(
         db,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=second.id,
         prerequisite_task_id=first.id,
         user_id=user.id,
     )
-    learning_plan_service.publish_version(
-        db, plan_id=plan.id, version_id=version.id, user_id=user.id
+    learning_plan_service.start_plan(
+        db, plan_id=plan.id, user_id=user.id
     )
     return headers, project["id"], version.id, first.id, second.id, third.id, plan.id
 
@@ -91,7 +91,7 @@ def test_returns_tasks_and_prerequisite_state(client, db_session):
         client, db_session, "day143-query"
     )
     response = client.get(
-        f"/projects/{project_id}/plan-versions/{version_id}/today-tasks",
+        f"/projects/{project_id}/plans/{version_id}/today-tasks",
         params={"target_date": "2026-09-28"},
         headers=headers,
     )
@@ -111,7 +111,7 @@ def test_boundary_date_returns_empty(client, db_session):
         client, db_session, "day143-boundary"
     )
     response = client.get(
-        f"/projects/{project_id}/plan-versions/{version_id}/today-tasks",
+        f"/projects/{project_id}/plans/{version_id}/today-tasks",
         params={"target_date": "2026-10-01"},
         headers=headers,
     )
@@ -119,37 +119,25 @@ def test_boundary_date_returns_empty(client, db_session):
     assert response.json()["tasks"] == []
 
 
-def test_draft_version_is_not_queryable(client, db_session):
-    headers, project_id, _, *_rest, plan_id = _context(
-        client, db_session, "day143-draft"
-    )
-    user = db_session.scalar(select(User).where(User.username == "day143-draft"))
-    assert user is not None
-    draft = learning_plan_service.create_next_draft(
-        db_session,
-        plan_id=plan_id,
-        user_id=user.id,
-        payload=PlanVersionCreate(goal="draft", content={}),
-    )
+def test_unknown_plan_is_not_queryable(client, db_session):
+    headers, project_id, *_ = _context(client, db_session, "unknown-plan")
     response = client.get(
-        f"/projects/{project_id}/plan-versions/{draft.id}/today-tasks",
-        params={"target_date": "2026-09-28"},
-        headers=headers,
+        f"/projects/{project_id}/plans/99999999/today-tasks",
+        params={"target_date": "2026-09-28"}, headers=headers,
     )
     assert response.status_code == 404
-
 
 def test_owner_and_auth_boundaries(client, db_session):
     _, project_id, version_id, *_ = _context(client, db_session, "day143-owner")
     other_headers = _login(client, "day143-other")
     response = client.get(
-        f"/projects/{project_id}/plan-versions/{version_id}/today-tasks",
+        f"/projects/{project_id}/plans/{version_id}/today-tasks",
         params={"target_date": "2026-09-28"},
         headers=other_headers,
     )
     assert response.status_code == 404
     anonymous = client.get(
-        f"/projects/{project_id}/plan-versions/{version_id}/today-tasks",
+        f"/projects/{project_id}/plans/{version_id}/today-tasks",
         params={"target_date": "2026-09-28"},
     )
     assert anonymous.status_code == 401
@@ -158,7 +146,7 @@ def test_owner_and_auth_boundaries(client, db_session):
 def test_invalid_date_returns_422(client):
     headers = _login(client, "day143-invalid-date")
     response = client.get(
-        "/projects/1/plan-versions/1/today-tasks",
+        "/projects/1/plans/1/today-tasks",
         params={"target_date": "not-a-date"},
         headers=headers,
     )

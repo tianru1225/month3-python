@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.learning_task import LearningTask, TaskStatus
 from app.repositories.today_task_repository import (
-    get_current_published_version_for_project,
+    get_plan_for_project,
     list_prerequisite_states,
     list_tasks_for_date,
 )
@@ -20,8 +20,8 @@ def _not_found() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail={
-            "code": "PLAN_VERSION_NOT_FOUND",
-            "message": "current published plan version not found",
+            "code": "PLAN_NOT_FOUND",
+            "message": "started plan not found",
         },
     )
 
@@ -31,7 +31,7 @@ def _to_response(
 ) -> TodayTaskResponse:
     return TodayTaskResponse(
         id=task.id,
-        plan_version_id=task.plan_version_id,
+        plan_id=task.plan_id,
         position=task.position,
         scheduled_date=task.scheduled_date,
         title=task.title,
@@ -55,25 +55,25 @@ def list_today_tasks_or_raise(
     db: Session,
     *,
     project_id: int,
-    plan_version_id: int,
+    plan_id: int,
     user_id: int,
     target_date: date,
 ) -> TodayTasksResponse:
-    version = get_current_published_version_for_project(
+    plan = get_plan_for_project(
         db,
         project_id=project_id,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
     )
-    if version is None:
+    if plan is None:
         raise _not_found()
 
     tasks: list[TodayTaskResponse] = []
     for task in list_tasks_for_date(
-        db, plan_version_id=version.id, target_date=target_date
+        db, plan_id=plan.id, target_date=target_date
     ):
         raw_states = list_prerequisite_states(
-            db, plan_version_id=version.id, task_id=task.id
+            db, plan_id=plan.id, task_id=task.id
         )
         states = [
             PrerequisiteTaskStatus(
@@ -86,7 +86,7 @@ def list_today_tasks_or_raise(
 
     return TodayTasksResponse(
         project_id=project_id,
-        plan_version_id=version.id,
+        plan_id=plan.id,
         target_date=target_date,
         tasks=tasks,
     )

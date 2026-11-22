@@ -39,7 +39,7 @@ class PlanDiff(BaseModel):
 
 
 class ReplanProposalCreate(BaseModel):
-    base_plan_version_id: int = Field(gt=0)
+    base_plan_id: int = Field(gt=0)
     trigger_code: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)
     ]
@@ -59,7 +59,7 @@ class ReplanDecisionCreate(BaseModel):
 class ReplanProposalResponse(BaseModel):
     id: int
     project_id: int
-    base_plan_version_id: int
+    base_plan_id: int
     created_by_user_id: int | None
     trigger_code: str
     reason: str

@@ -8,9 +8,6 @@ from app.models.knowledge import (
 )
 from app.models.learning_plan import (
     LearningPlan,
-    PlanSourceKind,
-    PlanVersion,
-    PlanVersionStatus,
 )
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskPrerequisite, TaskStatus
@@ -32,9 +29,6 @@ __all__ = [
     "Message",
     "LearningProject",
     "LearningPlan",
-    "PlanVersion",
-    "PlanVersionStatus",
-    "PlanSourceKind",
     "LearningTask",
     "TaskPrerequisite",
     "TaskStatus",

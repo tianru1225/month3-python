@@ -37,13 +37,13 @@ class LearningTask(Base):
     __table_args__ = (
         UniqueConstraint(
             "id",
-            "plan_version_id",
-            name="uq_learning_tasks_id_plan_version",
+            "plan_id",
+            name="uq_learning_tasks_id_plan",
         ),
         UniqueConstraint(
-            "plan_version_id",
+            "plan_id",
             "position",
-            name="uq_learning_tasks_version_position",
+            name="uq_learning_tasks_plan_position",
         ),
         CheckConstraint(
             "position >= 1",
@@ -81,16 +81,16 @@ class LearningTask(Base):
             name="ck_learning_tasks_completed_at",
         ),
         Index(
-            "ix_learning_tasks_version_date_position",
-            "plan_version_id",
+            "ix_learning_tasks_plan_date_position",
+            "plan_id",
             "scheduled_date",
             "position",
         ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    plan_version_id: Mapped[int] = mapped_column(
-        ForeignKey("plan_versions.id"), nullable=False, index=True
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_plans.id"), nullable=False, index=True
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     scheduled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -116,14 +116,14 @@ class TaskPrerequisite(Base):
     __tablename__ = "task_prerequisites"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["task_id", "plan_version_id"],
-            ["learning_tasks.id", "learning_tasks.plan_version_id"],
-            name="fk_task_prerequisites_task_version",
+            ["task_id", "plan_id"],
+            ["learning_tasks.id", "learning_tasks.plan_id"],
+            name="fk_task_prerequisites_task_plan",
         ),
         ForeignKeyConstraint(
-            ["prerequisite_task_id", "plan_version_id"],
-            ["learning_tasks.id", "learning_tasks.plan_version_id"],
-            name="fk_task_prerequisites_prerequisite_version",
+            ["prerequisite_task_id", "plan_id"],
+            ["learning_tasks.id", "learning_tasks.plan_id"],
+            name="fk_task_prerequisites_prerequisite_plan",
         ),
         UniqueConstraint(
             "task_id",
@@ -139,11 +139,11 @@ class TaskPrerequisite(Base):
             "ix_task_prerequisites_prerequisite_task_id",
             "prerequisite_task_id",
         ),
-        Index("ix_task_prerequisites_plan_version_id", "plan_version_id"),
+        Index("ix_task_prerequisites_plan_id", "plan_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    plan_version_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_id: Mapped[int] = mapped_column(Integer, nullable=False)
     task_id: Mapped[int] = mapped_column(Integer, nullable=False)
     prerequisite_task_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

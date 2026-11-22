@@ -7,11 +7,11 @@ from sqlalchemy import ForeignKeyConstraint
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from app.models.learning_plan import LearningPlan, PlanVersion
+from app.models.learning_plan import LearningPlan
 from app.models.learning_project import LearningProject
 from app.models.learning_task import LearningTask, TaskPrerequisite
 from app.models.user import User
-from app.schemas.learning_plan import PlanCreate, PlanReject, PlanVersionCreate
+from app.schemas.learning_plan import PlanCreate
 from app.schemas.learning_task import LearningTaskCreate
 from app.services import learning_plan_service, learning_task_service
 
@@ -19,7 +19,7 @@ from app.services import learning_plan_service, learning_task_service
 def _context(
     db_session: Session,
     username: str,
-) -> tuple[User, LearningProject, LearningPlan, PlanVersion]:
+) -> tuple[User, LearningProject, LearningPlan, LearningPlan]:
     user = User(username=username, password_hash="day134-test-placeholder")
     db_session.add(user)
     db_session.flush()
@@ -31,13 +31,11 @@ def _context(
     db_session.commit()
     db_session.refresh(user)
     db_session.refresh(project)
-    plan, version = learning_plan_service.create_plan_with_first_draft(
+    plan = version = learning_plan_service.create_plan(
         db_session,
         project_id=project.id,
         user_id=user.id,
         payload=PlanCreate(
-            name=f"{username} plan",
-            goal="complete the learning path",
             content={},
         ),
     )
@@ -71,7 +69,7 @@ def _task(
 ) -> LearningTask:
     return learning_task_service.create_task(
         db_session,
-        plan_version_id=version_id,
+        plan_id=version_id,
         user_id=user_id,
         payload=_payload(position),
     )
@@ -81,7 +79,7 @@ def test_create_task_uses_draft_status_and_structured_fields(db_session) -> None
     user, _, _, version = _context(db_session, "day134-create")
     task = learning_task_service.create_task(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=_payload(
             1,
@@ -90,7 +88,7 @@ def test_create_task_uses_draft_status_and_structured_fields(db_session) -> None
         ),
     )
 
-    assert task.plan_version_id == version.id
+    assert task.plan_id == version.id
     assert task.position == 1
     assert task.scheduled_date == date(2026, 9, 2)
     assert task.status == "DRAFT"
@@ -126,26 +124,26 @@ def test_list_tasks_orders_date_then_position_with_unscheduled_last(db_session) 
     user, _, _, version = _context(db_session, "day134-order")
     learning_task_service.create_task(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=_payload(3),
     )
     learning_task_service.create_task(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=_payload(2, scheduled_date=date(2026, 9, 3)),
     )
     learning_task_service.create_task(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
         payload=_payload(1, scheduled_date=date(2026, 9, 2)),
     )
 
-    tasks = learning_task_service.list_version_tasks(
+    tasks = learning_task_service.list_plan_tasks(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         user_id=user.id,
     )
     assert [task.position for task in tasks] == [1, 2, 3]
@@ -162,7 +160,7 @@ def test_duplicate_position_is_rejected_by_service_and_database(db_session) -> N
 
     db_session.add(
         LearningTask(
-            plan_version_id=version.id,
+            plan_id=version.id,
             position=1,
             title="duplicate",
             objective="duplicate",
@@ -178,80 +176,36 @@ def test_duplicate_position_is_rejected_by_service_and_database(db_session) -> N
     db_session.rollback()
 
 
-def test_owner_scope_and_cross_version_task_lookup(db_session) -> None:
-    owner, _, plan, version = _context(db_session, "day134-owner")
-    other, _, _, _ = _context(db_session, "day134-other")
-    first = _task(db_session, version.id, owner.id, 1)
-    second_version = learning_plan_service.create_next_draft(
-        db_session,
-        plan_id=plan.id,
-        user_id=owner.id,
-        payload=PlanVersionCreate(goal="second", content={}),
-    )
-    foreign_task = _task(db_session, second_version.id, owner.id, 1)
-
+def test_owner_scope_and_cross_plan_task_lookup(db_session) -> None:
+    owner, _, _, plan = _context(db_session, "task-owner")
+    other, _, _, foreign_plan = _context(db_session, "task-other")
+    first = _task(db_session, plan.id, owner.id, 1)
+    foreign_task = _task(db_session, foreign_plan.id, other.id, 1)
     with pytest.raises(HTTPException) as owner_error:
-        learning_task_service.list_version_tasks(
-            db_session,
-            plan_version_id=version.id,
-            user_id=other.id,
-        )
+        learning_task_service.list_plan_tasks(db_session, plan_id=plan.id, user_id=other.id)
     assert owner_error.value.status_code == 404
-
-    with pytest.raises(HTTPException) as cross_version:
+    with pytest.raises(HTTPException) as scope_error:
         learning_task_service.add_task_prerequisite(
-            db_session,
-            plan_version_id=version.id,
-            task_id=first.id,
-            prerequisite_task_id=foreign_task.id,
-            user_id=owner.id,
+            db_session, plan_id=plan.id, task_id=first.id,
+            prerequisite_task_id=foreign_task.id, user_id=owner.id,
         )
-    assert cross_version.value.status_code == 404
-    assert cross_version.value.detail["code"] == "LEARNING_TASK_NOT_FOUND"
+    assert scope_error.value.status_code == 404
+    assert scope_error.value.detail["code"] == "LEARNING_TASK_NOT_FOUND"
 
-
-def test_published_and_rejected_versions_are_immutable(db_session) -> None:
-    user, _, plan, published = _context(db_session, "day134-immutable")
-    first = _task(db_session, published.id, user.id, 1)
-    second = _task(db_session, published.id, user.id, 2)
-    learning_plan_service.publish_version(
-        db_session,
-        plan_id=plan.id,
-        version_id=published.id,
-        user_id=user.id,
-    )
-
+def test_started_plan_content_is_immutable(db_session) -> None:
+    user, _, _, plan = _context(db_session, "task-immutable")
+    first = _task(db_session, plan.id, user.id, 1)
+    second = _task(db_session, plan.id, user.id, 2)
+    learning_plan_service.start_plan(db_session, plan_id=plan.id, user_id=user.id)
     with pytest.raises(HTTPException) as create_error:
-        _task(db_session, published.id, user.id, 3)
-    assert create_error.value.status_code == 409
-
+        _task(db_session, plan.id, user.id, 3)
+    assert create_error.value.detail["code"] == "PLAN_STARTED"
     with pytest.raises(HTTPException) as edge_error:
         learning_task_service.add_task_prerequisite(
-            db_session,
-            plan_version_id=published.id,
-            task_id=second.id,
-            prerequisite_task_id=first.id,
-            user_id=user.id,
+            db_session, plan_id=plan.id, task_id=second.id,
+            prerequisite_task_id=first.id, user_id=user.id,
         )
-    assert edge_error.value.status_code == 409
-
-    rejected = learning_plan_service.create_next_draft(
-        db_session,
-        plan_id=plan.id,
-        user_id=user.id,
-        payload=PlanVersionCreate(goal="reject", content={}),
-    )
-    learning_plan_service.reject_draft(
-        db_session,
-        plan_id=plan.id,
-        version_id=rejected.id,
-        user_id=user.id,
-        payload=PlanReject(reason="not useful"),
-    )
-    with pytest.raises(HTTPException) as rejected_error:
-        _task(db_session, rejected.id, user.id, 1)
-    assert rejected_error.value.status_code == 409
-
+    assert edge_error.value.detail["code"] == "PLAN_STARTED"
 
 def test_prerequisite_idempotency_self_cycle_and_listing(db_session) -> None:
     user, _, _, version = _context(db_session, "day134-graph")
@@ -261,21 +215,21 @@ def test_prerequisite_idempotency_self_cycle_and_listing(db_session) -> None:
 
     edge, created = learning_task_service.add_task_prerequisite(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=second.id,
         prerequisite_task_id=first.id,
         user_id=user.id,
     )
     duplicate, duplicate_created = learning_task_service.add_task_prerequisite(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=second.id,
         prerequisite_task_id=first.id,
         user_id=user.id,
     )
     learning_task_service.add_task_prerequisite(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=third.id,
         prerequisite_task_id=second.id,
         user_id=user.id,
@@ -286,7 +240,7 @@ def test_prerequisite_idempotency_self_cycle_and_listing(db_session) -> None:
     assert duplicate.id == edge.id
     assert learning_task_service.get_task_prerequisite_ids(
         db_session,
-        plan_version_id=version.id,
+        plan_id=version.id,
         task_id=second.id,
         user_id=user.id,
     ) == [first.id]
@@ -294,7 +248,7 @@ def test_prerequisite_idempotency_self_cycle_and_listing(db_session) -> None:
     with pytest.raises(HTTPException) as self_error:
         learning_task_service.add_task_prerequisite(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=first.id,
             prerequisite_task_id=first.id,
             user_id=user.id,
@@ -304,7 +258,7 @@ def test_prerequisite_idempotency_self_cycle_and_listing(db_session) -> None:
     with pytest.raises(HTTPException) as cycle_error:
         learning_task_service.add_task_prerequisite(
             db_session,
-            plan_version_id=version.id,
+            plan_id=version.id,
             task_id=first.id,
             prerequisite_task_id=third.id,
             user_id=user.id,
@@ -328,12 +282,12 @@ def test_composite_foreign_keys_encode_same_version_rule() -> None:
     }
 
     assert (
-        ("task_id", "plan_version_id"),
-        ("learning_tasks.id", "learning_tasks.plan_version_id"),
+        ("task_id", "plan_id"),
+        ("learning_tasks.id", "learning_tasks.plan_id"),
     ) in pairs
     assert (
-        ("prerequisite_task_id", "plan_version_id"),
-        ("learning_tasks.id", "learning_tasks.plan_version_id"),
+        ("prerequisite_task_id", "plan_id"),
+        ("learning_tasks.id", "learning_tasks.plan_id"),
     ) in pairs
 
 
@@ -341,7 +295,7 @@ def test_database_rejects_invalid_status_completion_pair(db_session) -> None:
     user, _, _, version = _context(db_session, "day134-status-db")
     db_session.add(
         LearningTask(
-            plan_version_id=version.id,
+            plan_id=version.id,
             position=1,
             title="invalid status",
             objective="invalid status",
@@ -360,7 +314,7 @@ def test_database_rejects_invalid_status_completion_pair(db_session) -> None:
 
     db_session.add(
         LearningTask(
-            plan_version_id=version.id,
+            plan_id=version.id,
             position=2,
             title="invalid completion",
             objective="invalid completion",

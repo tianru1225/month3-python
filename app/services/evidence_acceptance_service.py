@@ -3,13 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.models.evidence import Evidence, EvidenceType
 from app.models.evaluation import EvaluationDecision, RuleEvaluationStatus
-from app.models.learning_plan import PlanVersionStatus
 from app.models.learning_task import TaskStatus
 from app.repositories.evaluation_repository import (
     get_latest_evidence_for_task,
 )
+from app.repositories.learning_plan_repository import get_owned_plan
 from app.repositories.learning_task_repository import (
-    get_owned_plan_version,
     get_task,
 )
 from app.schemas.evaluation import HumanDecisionCreate, RuleEvaluationCreate
@@ -90,37 +89,37 @@ def _rule_for(
 def evaluate_latest_evidence(
     db: Session,
     *,
-    plan_version_id: int,
+    plan_id: int,
     task_id: int,
     user_id: int,
 ) -> EvidenceAcceptanceResponse:
-    version = get_owned_plan_version(
+    plan = get_owned_plan(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         user_id=user_id,
     )
-    if version is None:
+    if plan is None:
         raise _error(
-            "PLAN_VERSION_NOT_FOUND",
-            "plan version not found",
+            "PLAN_NOT_FOUND",
+            "plan not found",
             status.HTTP_404_NOT_FOUND,
         )
 
     task = get_task(
         db,
-        plan_version_id=plan_version_id,
+        plan_id=plan_id,
         task_id=task_id,
     )
     if task is None:
         raise _error(
             "LEARNING_TASK_NOT_FOUND",
-            "learning task not found in this plan version",
+            "learning task not found in this plan",
             status.HTTP_404_NOT_FOUND,
         )
-    if version.status != PlanVersionStatus.PUBLISHED.value or not version.is_current:
+    if plan.locked_at is None:
         raise _error(
-            "PLAN_VERSION_NOT_ACTIVE",
-            "evaluation requires the current published plan version",
+            "PLAN_NOT_STARTED",
+            "evaluation requires the started plan",
             status.HTTP_409_CONFLICT,
         )
     if task.status != TaskStatus.SUBMITTED.value:
